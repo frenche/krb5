@@ -313,6 +313,140 @@ main(int argc, char **argv)
         free(list);
     }
 
+    {
+        krb5_principal ep;
+
+        ret = krb5_parse_name_flags(context, user,
+                                    KRB5_PRINCIPAL_PARSE_ENTERPRISE, &ep);
+        if (ret)
+            err(context, ret, "krb5_parse_name_flags");
+
+        /* try to verify as enterprise */
+        ret = krb5_pac_verify(context, pac, authtime, ep,
+                              &member_keyblock, &kdc_keyblock);
+        if (ret == 0)
+            err(context, ret, "krb5_pac_verify should have failed");
+
+        ret = krb5_pac_sign(context, pac, authtime, ep,
+                            &member_keyblock, &kdc_keyblock, &data);
+        if (ret == 0)
+            err(context, ret, "krb5_pac_sign should have failed");
+
+        /* try to verify with realm */
+        ret = krb5_pac_verify_ex(context, pac, authtime, p,
+                                 &member_keyblock, &kdc_keyblock, 1);
+        if (ret == 0)
+            err(context, ret,
+                "krb5_pac_verify_ex with realm should have failed");
+
+        /* Currently we can't re-sign the PAC with realm (although
+         * that could be useful), only sign a new one. */
+        ret = krb5_pac_sign_ex(context, pac, authtime, p,
+                           &member_keyblock, &kdc_keyblock, &data, 1);
+        if (ret == 0)
+            err(context, ret,
+                "krb5_pac_sign_ex with realm should have failed");
+
+        krb5_pac_free(context, pac);
+
+        /* test enterprise */
+        ret = krb5_pac_init(context, &pac);
+        if (ret)
+            err(context, ret, "krb5_pac_init");
+
+        ret = krb5_pac_sign(context, pac, authtime, ep,
+                            &member_keyblock, &kdc_keyblock, &data);
+        if (ret)
+            err(context, ret, "krb5_pac_sign enterprise failed");
+
+        krb5_pac_free(context, pac);
+
+        ret = krb5_pac_parse(context, data.data, data.length, &pac);
+        krb5_free_data_contents(context, &data);
+        if (ret)
+            err(context, ret, "krb5_pac_parse failed");
+
+        ret = krb5_pac_verify(context, pac, authtime, ep,
+                              &member_keyblock, &kdc_keyblock);
+        if (ret)
+            err(context, ret, "krb5_pac_verify enterprise failed");
+
+        ret = krb5_pac_verify(context, pac, authtime, p,
+                              &member_keyblock, &kdc_keyblock);
+        if (ret == 0)
+            err(context, ret, "krb5_pac_verify should have failed");
+
+        krb5_pac_free(context, pac);
+
+        /* test with realm */
+        ret = krb5_pac_init(context, &pac);
+        if (ret)
+            err(context, ret, "krb5_pac_init");
+
+        ret = krb5_pac_sign_ex(context, pac, authtime, p,
+                               &member_keyblock, &kdc_keyblock, &data, 1);
+        if (ret)
+            err(context, ret, "krb5_pac_sign_ex with realm failed");
+
+        krb5_pac_free(context, pac);
+
+        ret = krb5_pac_parse(context, data.data, data.length, &pac);
+        krb5_free_data_contents(context, &data);
+        if (ret)
+            err(context, ret, "krb5_pac_parse failed");
+
+        ret = krb5_pac_verify_ex(context, pac, authtime, p,
+                                 &member_keyblock, &kdc_keyblock, 1);
+        if (ret)
+            err(context, ret, "krb5_pac_verify_ex with realm failed");
+
+        ret = krb5_pac_verify(context, pac, authtime, p,
+                              &member_keyblock, &kdc_keyblock);
+        if (ret == 0)
+            err(context, ret, "krb5_pac_verify should have failed");
+
+        krb5_pac_free(context, pac);
+
+        /* test enterprise with realm */
+        ret = krb5_pac_init(context, &pac);
+        if (ret)
+            err(context, ret, "krb5_pac_init");
+
+        ret = krb5_pac_sign_ex(context, pac, authtime, ep,
+                               &member_keyblock, &kdc_keyblock, &data, 1);
+        if (ret)
+            err(context, ret, "krb5_pac_sign_ex ent with realm failed");
+
+        krb5_pac_free(context, pac);
+
+        ret = krb5_pac_parse(context, data.data, data.length, &pac);
+        krb5_free_data_contents(context, &data);
+        if (ret)
+            err(context, ret, "krb5_pac_parse failed");
+
+        ret = krb5_pac_verify_ex(context, pac, authtime, ep,
+                                 &member_keyblock, &kdc_keyblock, 1);
+        if (ret)
+            err(context, ret, "krb5_pac_verify_ex ent with realm failed");
+
+        ret = krb5_pac_verify(context, pac, authtime, p,
+                              &member_keyblock, &kdc_keyblock);
+        if (ret == 0)
+            err(context, ret, "krb5_pac_verify should have failed");
+
+        ret = krb5_pac_verify(context, pac, authtime, ep,
+                              &member_keyblock, &kdc_keyblock);
+        if (ret == 0)
+            err(context, ret, "krb5_pac_verify should have failed");
+
+        ret = krb5_pac_verify_ex(context, pac, authtime, p,
+                                 &member_keyblock, &kdc_keyblock, 1);
+        if (ret == 0)
+            err(context, ret, "krb5_pac_verify_ex should have failed");
+
+        krb5_free_principal(context, ep);
+    }
+
     krb5_pac_free(context, pac);
 
     krb5_free_principal(context, p);
