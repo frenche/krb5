@@ -375,6 +375,41 @@ fetch_kdb_authdata(krb5_context context, unsigned int flags,
     krbtgt_key = (header_key != NULL) ? header_key : server_key;
 
     tgt_authdata = tgs_req ? enc_tkt_req->authorization_data : NULL;
+
+    {
+        krb5_authdata **authdata = NULL;
+	const unsigned char *p;
+	size_t len, i;
+
+	ret = krb5_find_authdata(context,
+				 tgt_authdata,
+				  NULL,
+				  KRB5_AUTHDATA_WIN2K_PAC,
+				  &authdata);
+	if (ret) return ret;
+
+	if (authdata != NULL) {
+
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+    len = authdata[0]->length;
+    p = authdata[0]->contents;
+    fprintf(stderr, "RAW PAC KDC [len:%zu]:\n", len);
+    for (i = 0; i < len; i++) {
+	if (i%8 == 0)
+		fprintf(stderr, "    ");
+        fprintf(stderr, "0x%02x,%c", p[i], (i + 1) %8 == 0 ? '\n' : ' ');
+    }
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+    fprintf(stderr, "authtime: %d:\n", enc_tkt_reply->times.authtime);
+    fprintf(stderr, "server (krbtgt) key [type:0x%x] [length:%d]:\n", krbtgt_key->enctype, krbtgt_key->length);
+    for (i = 0; i < krbtgt_key->length; i++)
+        fprintf(stderr, "0x%02x,%c", krbtgt_key->contents[i], (i + 1) %8 == 0 ? '\n' : ' ');
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+
+    }}
+
     ret = krb5_db_sign_authdata(context, flags, actual_client, client,
                                 server, krbtgt, client_key, server_key,
                                 krbtgt_key, enc_tkt_reply->session,

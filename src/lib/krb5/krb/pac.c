@@ -303,6 +303,15 @@ krb5_pac_parse(krb5_context context,
     size_t header_len;
     krb5_ui_4 cbuffers, version;
 
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+    fprintf(stderr, "RAW PAC [len:%zu]:\n", len);
+    for (i = 0; i < len; i++) {
+	if (i%8 == 0)
+		fprintf(stderr, "    ");
+        fprintf(stderr, "0x%02x,%c", p[i], (i + 1) %8 == 0 ? '\n' : ' ');
+    }
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+
     *ppac = NULL;
 
     if (len < PACTYPE_LENGTH)
@@ -644,6 +653,15 @@ krb5_pac_verify_ex(krb5_context context,
                    krb5_boolean with_realm)
 {
     krb5_error_code ret;
+    int i;
+
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
+    fprintf(stderr, "authtime: %d:\n", authtime);
+    fprintf(stderr, "server key [type:0x%x] [length:%d]:\n", server->enctype, server->length);
+    for (i = 0; i < server->length; i++)
+        fprintf(stderr, "0x%02x,%c", server->contents[i], (i + 1) %8 == 0 ? '\n' : ' ');
+    fprintf(stderr, "\n\n\n---------------\n\n\n");
 
     if (server != NULL) {
         ret = k5_pac_verify_server_checksum(context, pac, server);
