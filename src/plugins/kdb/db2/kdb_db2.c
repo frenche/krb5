@@ -757,6 +757,10 @@ krb5_db2_get_principal(krb5_context context, krb5_const_principal searchfor,
 {
     krb5_db2_context *dbc;
     krb5_error_code retval;
+    krb5_principal referral_princ = NULL;
+    krb5_principal inner_enterprise = NULL;
+    char *inner_enterprise_str = NULL;
+    char *defrealm = NULL;
     DB     *db;
     DBT     key, contents;
     krb5_data keydata, contdata;
@@ -771,6 +775,53 @@ krb5_db2_get_principal(krb5_context context, krb5_const_principal searchfor,
     retval = ctx_lock(context, dbc, KRB5_LOCKMODE_SHARED);
     if (retval)
         return retval;
+
+    /*
+     * When NT-ENTERPRISE name types are used for service name, they are
+     * to be interpreted as an envelope encapsulating the full canonical
+     * principal name including its realm in a single name component.
+     *
+     * This allows them to be used for referrals as SPNs by setting the outer
+     * realm to the client one and asking for a ticket from the client's KDC
+     * then following referral to the realm of the service.
+     *
+     * See MS-KILE 3.3.5.1.1 Server Principal Lookup.
+     * See also Heimdal and Samba handling, like:
+     * https://github.com/heimdal/heimdal/blob/1d4ebc0df798cb1d8edca910b806e55c6c19bccb/kdc/misc.c#L86
+     */
+    if (searchfor->type == KRB5_NT_ENTERPRISE_PRINCIPAL &&
+        ((flags & KRB5_KDB_FLAG_CLIENT_REFERRALS_ONLY) == 0)) {
+        retval = krb5_unparse_name_flags(context, searchfor,
+                                         KRB5_PRINCIPAL_UNPARSE_NO_REALM,
+                                         &inner_enterprise_str);
+        if (retval)
+            goto cleanup;
+
+        retval = krb5_parse_name(context, inner_enterprise_str,
+                                 &inner_enterprise);
+        if (retval)
+            goto cleanup;
+
+	searchfor = inner_enterprise;
+    }
+
+    retval = krb5_get_default_realm(context, &defrealm);
+    if (retval == 0 && ((flags & KRB5_KDB_FLAG_CLIENT_REFERRALS_ONLY) == 0) &&
+        (flags & KRB5_KDB_FLAG_CANONICALIZE) &&
+         strncmp(KRB5_TGS_NAME, searchfor->data[0].data, searchfor->data[0].length) &&
+          strncmp(defrealm, krb5_princ_realm(context, searchfor)->data,
+           krb5_princ_realm(context, searchfor)->length))
+    {
+        retval = krb5_build_principal_ext(context, &referral_princ,
+                                          strlen(defrealm), defrealm,
+                                          KRB5_TGS_NAME_SIZE, KRB5_TGS_NAME,
+                                          searchfor->realm.length,
+                                          searchfor->realm.data, 0);
+        if (retval)
+            goto cleanup;
+
+        searchfor = referral_princ;
+    }
 
     /* XXX deal with wildcard lookups */
     retval = krb5_encode_princ_dbkey(context, &keydata, searchfor);
@@ -798,6 +849,10 @@ krb5_db2_get_principal(krb5_context context, krb5_const_principal searchfor,
     }
 
 cleanup:
+    krb5_free_principal(context, referral_princ);
+    krb5_free_principal(context, inner_enterprise);
+    krb5_free_default_realm(context, defrealm);
+    free(inner_enterprise_str);
     (void) krb5_db2_unlock(context); /* unlock read lock */
     return retval;
 }
