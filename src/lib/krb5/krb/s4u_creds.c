@@ -580,9 +580,20 @@ krb5_get_self_cred_from_kdc(krb5_context context,
         } else {
             /* When asking a foreign realm, use the enterprise principal, with
              * the realm set to the TGS realm. */
-            sprinc = *eprinc;
-            sprinc.realm = tgtptr->server->data[1];
-            s4u_creds.server = &sprinc;
+            krb5_principal remote_krbtgt;
+
+            code = krb5_build_principal_ext(context, &remote_krbtgt,
+                                            tgtptr->server->data[1].length,
+                                            tgtptr->server->data[1].data,
+                                            KRB5_TGS_NAME_SIZE, KRB5_TGS_NAME,
+                                            in_creds->server->realm.length,
+                                            in_creds->server->realm.data, 0);
+            if (code)
+                goto cleanup;
+
+            //sprinc = *eprinc;
+            //sprinc.realm = tgtptr->server->data[1];
+            s4u_creds.server = remote_krbtgt;
         }
 
         code = krb5_get_cred_via_tkt_ext(context, tgtptr,
