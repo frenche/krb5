@@ -330,14 +330,32 @@ test_get_principal(krb5_context context, krb5_const_principal search_for,
                 princ = NULL;
                 ret = 0;
                 goto cleanup;
+            } else if (flags & KRB5_KDB_FLAG_CANONICALIZE) {
+                krb5_principal xrealm_princ;
+
+                check(krb5_build_principal_ext(context, &xrealm_princ,
+                                               search_for->realm.length,
+                                               search_for->realm.data,
+                                               KRB5_TGS_NAME_SIZE,
+                                               KRB5_TGS_NAME,
+                                               princ->realm.length,
+                                               princ->realm.data, 0));
+
+                krb5_free_principal(context, princ);
+                princ = xrealm_princ;
+
+                krb5_free_unparsed_name(context, search_name);
+                check(krb5_unparse_name_flags(context, xrealm_princ,
+                                              KRB5_PRINCIPAL_UNPARSE_NO_REALM,
+                                              &search_name));
+                ename = search_name;
             } else {
-                /* We could look up a cross-realm TGS entry, but we don't need
-                 * that behavior yet. */
                 ret = KRB5_KDB_NOENTRY;
                 goto cleanup;
             }
+        } else {
+            ename = canon;
         }
-        ename = canon;
     } else {
         check(krb5_copy_principal(context, search_for, &princ));
         ename = search_name;
