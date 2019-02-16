@@ -129,6 +129,8 @@
 #define KRB5_KDB_FLAG_CROSS_REALM               0x00001000
 /* Allow in-realm aliases */
 #define KRB5_KDB_FLAG_ALIAS_OK                  0x00002000
+/* Issuing referral */
+#define KRB5_KDB_FLAG_ISSUING_REFERRAL          0x00004000
 
 #define KRB5_KDB_FLAGS_S4U                      ( KRB5_KDB_FLAG_PROTOCOL_TRANSITION | \
                                                   KRB5_KDB_FLAG_CONSTRAINED_DELEGATION )
@@ -664,6 +666,7 @@ krb5_db_get_key_data_kvno( krb5_context    context,
 krb5_error_code krb5_db_sign_authdata(krb5_context kcontext,
                                       unsigned int flags,
                                       krb5_const_principal client_princ,
+                                      krb5_const_principal server_princ,
                                       krb5_db_entry *client,
                                       krb5_db_entry *server,
                                       krb5_db_entry *krbtgt,
@@ -713,6 +716,19 @@ krb5_error_code krb5_db_get_s4u_x509_principal(krb5_context kcontext,
                                                krb5_const_principal in_princ,
                                                unsigned int flags,
                                                krb5_db_entry **entry);
+
+krb5_error_code krb5_db_allowed_to_delegate_from(krb5_context context,
+                                                 krb5_const_principal client,
+                                                 krb5_const_principal server,
+                                                 const krb5_db_entry *proxy);
+
+krb5_error_code krb5_db_get_authdata_info(krb5_context context,
+                                          krb5_boolean xrealm_s4u,
+                                          krb5_authdata **in_authdata,
+                                          krb5_principal *client_out,
+                                          krb5_boolean *not_delegated);
+
+krb5_boolean krb5_db_support_rbcd(krb5_context kcontext);
 
 /**
  * Sort an array of @a krb5_key_data keys in descending order by their kvno.
@@ -1306,6 +1322,7 @@ typedef struct _kdb_vftabl {
     krb5_error_code (*sign_authdata)(krb5_context kcontext,
                                      unsigned int flags,
                                      krb5_const_principal client_princ,
+                                     krb5_const_principal server_princ,
                                      krb5_db_entry *client,
                                      krb5_db_entry *server,
                                      krb5_db_entry *krbtgt,
@@ -1425,6 +1442,19 @@ typedef struct _kdb_vftabl {
                                               krb5_db_entry **entry_out);
 
     /* End of minor version 1 for major version 7. */
+
+    /* RBCD */
+    krb5_error_code (*allowed_to_delegate_from)(krb5_context context,
+                                                krb5_const_principal client,
+                                                krb5_const_principal server,
+                                                const krb5_db_entry *proxy);
+
+    krb5_error_code (*get_authdata_info)(krb5_context context,
+                                         krb5_boolean xrealm_s4u,
+                                         krb5_authdata **in_authdata,
+                                         krb5_principal *client_out,
+                                         krb5_boolean *not_delegated);
+
 } kdb_vftabl;
 
 #endif /* !defined(_WIN32) */
