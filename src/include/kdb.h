@@ -129,6 +129,8 @@
 #define KRB5_KDB_FLAG_CROSS_REALM               0x00001000
 /* Allow in-realm aliases */
 #define KRB5_KDB_FLAG_ALIAS_OK                  0x00002000
+/* Issuing referral */
+#define KRB5_KDB_FLAG_ISSUING_REFERRAL          0x00004000
 
 #define KRB5_KDB_FLAGS_S4U                      ( KRB5_KDB_FLAG_PROTOCOL_TRANSITION | \
                                                   KRB5_KDB_FLAG_CONSTRAINED_DELEGATION )
@@ -211,6 +213,7 @@ typedef struct _krb5_db_entry_new {
     krb5_octet          * e_data;               /* Extra data to be saved */
 
     krb5_principal        princ;                /* Length, data */
+    krb5_principal        req_princ;                /* Length, data */
     krb5_tl_data        * tl_data;              /* Linked list */
 
     /* key_data must be sorted by kvno in descending order. */

@@ -805,6 +805,10 @@ krb5_db_get_principal(krb5_context kcontext, krb5_const_principal search_for,
     if (status)
         return status;
 
+    status = krb5_copy_principal(kcontext, search_for, &(*entry)->req_princ);
+    if (status)
+        return status;
+
     /* Sort the keys in the db entry as some parts of krb5 expect it to be. */
     if ((*entry)->key_data != NULL)
         krb5_dbe_sort_key_data((*entry)->key_data, (*entry)->n_key_data);
