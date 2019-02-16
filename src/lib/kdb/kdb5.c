@@ -330,6 +330,13 @@ copy_vtable(const kdb_vftabl *in, kdb_vftabl *out)
     if (in->min_ver >= 1)
         out->get_s4u_x509_principal = in->get_s4u_x509_principal;
 
+    out->allowed_to_delegate_from = NULL;
+    out->get_authdata_info = NULL;
+    if (in->min_ver >= 2) {
+        out->allowed_to_delegate_from = in->allowed_to_delegate_from;
+        out->get_authdata_info = in->get_authdata_info;
+    }
+
     /* Set defaults for optional fields. */
     if (out->fetch_master_key == NULL)
         out->fetch_master_key = krb5_db_def_fetch_mkey;
@@ -2594,7 +2601,9 @@ krb5_db_set_context(krb5_context context, void *db_context)
 
 krb5_error_code
 krb5_db_sign_authdata(krb5_context kcontext, unsigned int flags,
-                      krb5_const_principal client_princ, krb5_db_entry *client,
+                      krb5_const_principal client_princ,
+                      krb5_const_principal server_princ,
+                      krb5_db_entry *client,
                       krb5_db_entry *server, krb5_db_entry *krbtgt,
                       krb5_keyblock *client_key, krb5_keyblock *server_key,
                       krb5_keyblock *krbtgt_key, krb5_keyblock *session_key,
@@ -2610,8 +2619,8 @@ krb5_db_sign_authdata(krb5_context kcontext, unsigned int flags,
         return status;
     if (v->sign_authdata == NULL)
         return KRB5_PLUGIN_OP_NOTSUPP;
-    return v->sign_authdata(kcontext, flags, client_princ, client, server,
-                            krbtgt, client_key, server_key, krbtgt_key,
+    return v->sign_authdata(kcontext, flags, client_princ, server_princ, client,
+                            server, krbtgt, client_key, server_key, krbtgt_key,
                             session_key, authtime, tgt_auth_data,
                             signed_auth_data);
 }
@@ -2743,6 +2752,52 @@ krb5_db_get_s4u_x509_principal(krb5_context kcontext,
         krb5_dbe_sort_key_data((*entry)->key_data, (*entry)->n_key_data);
 
     return 0;
+}
+
+krb5_error_code krb5_db_allowed_to_delegate_from(krb5_context kcontext,
+                                                 krb5_const_principal client,
+                                                 krb5_const_principal server,
+                                                 const krb5_db_entry *proxy)
+{
+    krb5_error_code ret;
+    kdb_vftabl *v;
+
+    ret = get_vftabl(kcontext, &v);
+    if (ret)
+        return ret;
+    if (v->allowed_to_delegate_from == NULL)
+        return KRB5_PLUGIN_OP_NOTSUPP;
+    return v->allowed_to_delegate_from(kcontext, client, server, proxy);
+}
+
+krb5_error_code krb5_db_get_authdata_info(krb5_context kcontext,
+                                          krb5_boolean xrealm_s4u,
+                                          krb5_authdata **in_authdata,
+                                          krb5_principal *client_out,
+                                          krb5_boolean *not_delegated)
+{
+    krb5_error_code ret;
+    kdb_vftabl *v;
+
+    ret = get_vftabl(kcontext, &v);
+    if (ret)
+        return ret;
+    if (v->get_authdata_info == NULL)
+        return KRB5_PLUGIN_OP_NOTSUPP;
+    return v->get_authdata_info(kcontext, xrealm_s4u, in_authdata, client_out,
+                                not_delegated);
+}
+
+krb5_boolean krb5_db_support_rbcd(krb5_context kcontext)
+{
+    krb5_error_code ret;
+    kdb_vftabl *v;
+
+    ret = get_vftabl(kcontext, &v);
+    if (ret)
+        return FALSE;
+
+    return v->get_authdata_info != NULL && v->allowed_to_delegate_from != NULL;
 }
 
 void

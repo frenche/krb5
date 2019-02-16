@@ -1659,10 +1659,6 @@ check_allowed_to_delegate_to(krb5_context context, krb5_const_principal client,
                              const krb5_db_entry *server,
                              krb5_const_principal proxy)
 {
-    /* Can't get a TGT (otherwise it would be unconstrained delegation) */
-    if (krb5_is_tgs_principal(proxy))
-        return KRB5KDC_ERR_POLICY;
-
     /* Must be in same realm */
     if (!krb5_realm_compare(context, server->princ, proxy))
         return KRB5KDC_ERR_POLICY;
@@ -1676,10 +1672,50 @@ kdc_process_s4u2proxy_req(kdc_realm_t *kdc_active_realm,
                           const krb5_enc_tkt_part *t2enc,
                           const krb5_db_entry *server,
                           krb5_const_principal server_princ,
+                          const krb5_db_entry *proxy,
                           krb5_const_principal proxy_princ,
+                          krb5_principal *client_out,
                           const char **status)
 {
     krb5_error_code errcode;
+    krb5_boolean support_rbcd;
+    krb5_boolean foreign_server;
+    krb5_boolean not_delgated;
+    krb5_principal pac_princ, client_princ = t2enc->client;
+
+    foreign_server = !is_local_principal(kdc_active_realm, server_princ);
+
+    errcode = kdc_get_pa_pac_rbcd(kdc_context, request->padata, &support_rbcd);
+    if (errcode)
+        return errcode;
+
+    if (support_rbcd && !krb5_db_support_rbcd(kdc_context))
+        support_rbcd = FALSE;
+
+    if (support_rbcd) {
+        errcode = krb5_db_get_authdata_info(kdc_context,
+                                            foreign_server,
+                                            t2enc->authorization_data,
+                                            &pac_princ,
+                                            &not_delgated);
+        if (errcode == KRB5_PLUGIN_NO_HANDLE ||
+            errcode == KRB5_PLUGIN_OP_NOTSUPP)
+            support_rbcd = FALSE;
+        else if (errcode)
+            return errcode;
+        else {
+            if (not_delgated) {
+                *status = "NOT_ALLOWED_TO_DELEGATE";
+                return KRB5KDC_ERR_BADOPTION;
+            }
+
+            if (foreign_server) {
+                *client_out = pac_princ;
+                client_princ = pac_princ;
+            } else
+                krb5_free_principal(kdc_context, pac_princ);
+        }
+    }
 
     /*
      * Constrained delegation is mutually exclusive with renew/forward/etc.
@@ -1691,12 +1727,54 @@ kdc_process_s4u2proxy_req(kdc_realm_t *kdc_active_realm,
         return KRB5KDC_ERR_BADOPTION;
     }
 
+    /* Can't get a TGT (otherwise it would be unconstrained delegation) */
+    if (krb5_is_tgs_principal(proxy_princ)) {
+        *status = "NOT_ALLOWED_TO_DELEGATE";
+        return KRB5KDC_ERR_POLICY;
+    }
+
     /* Ensure that evidence ticket server matches TGT client */
-    if (!krb5_principal_compare(kdc_context,
-                                server->princ, /* after canon */
-                                server_princ)) {
+    if (support_rbcd && is_cross_tgs_principal(server->princ)) {
+        /* check that header tickt client is not local,
+         * that the proxy server is local,
+         * and that t2enc->client equals header tickt client (server_princ). */
+        if (proxy == NULL || !foreign_server ||
+            !krb5_principal_compare(kdc_context, t2enc->client,
+                                    server_princ)) {
+            *status = "INVALID_S4U2PROXY_XREALM_REQUEST";
+            return KRB5KDC_ERR_BADOPTION;
+        }
+    } else if (!krb5_principal_compare(kdc_context,
+                                       server->princ, /* after canon */
+                                       server_princ)) {
         *status = "EVIDENCE_TICKET_MISMATCH";
         return KRB5KDC_ERR_SERVER_NOMATCH;
+    }
+
+    if (support_rbcd) {
+        if (proxy == NULL) {
+            if (foreign_server) {
+                *status = "INVALID_S4U2PROXY_XREALM_REQUEST";
+                return KRB5KDC_ERR_BADOPTION;
+            }
+            /* The KDC in the resource realm will check if delegation is
+             * allowed */
+            return 0;
+	}
+
+        errcode = krb5_db_allowed_to_delegate_from(kdc_context,
+                                                   client_princ,
+                                                   server_princ,
+                                                   proxy);
+        if (errcode == 0 || errcode != KRB5KDC_ERR_POLICY)
+            return errcode;
+
+        if (!is_local_principal(kdc_active_realm, server_princ)) {
+            *status = "INVALID_S4U2PROXY_XREALM_REQUEST";
+            return KRB5KDC_ERR_BADOPTION;
+        }
+
+        /* Fallback to old constrained delegation */
     }
 
     if (!isflagset(t2enc->flags, TKT_FLG_FORWARDABLE)) {
@@ -1905,13 +1983,13 @@ cleanup:
 }
 
 krb5_error_code
-kdc_get_pa_pac_options(krb5_context context, krb5_pa_data **enc_padata,
+kdc_get_pa_pac_options(krb5_context context, krb5_pa_data **in_padata,
                        krb5_pa_pac_options **pac_options)
 {
     krb5_pa_data *padata;
     krb5_data pac_options_data;
 
-    padata = krb5int_find_pa_data(context, enc_padata, 167);
+    padata = krb5int_find_pa_data(context, in_padata, KRB5_PADATA_PAC_OPTIONS);
     if (padata == NULL)
         return 0;
 
@@ -1942,6 +2020,26 @@ kdc_add_pa_pac_options(krb5_context context, krb5_kdc_req *request,
                                       pac_options_data);
     krb5_free_data(context, pac_options_data);
     return retval;
+}
+
+krb5_error_code
+kdc_get_pa_pac_rbcd(krb5_context context, krb5_pa_data **in_padata,
+                    krb5_boolean *supported)
+{
+    krb5_error_code retval;
+    krb5_pa_pac_options *pac_options = NULL;
+
+    *supported = FALSE;
+
+    retval = kdc_get_pa_pac_options(context, in_padata, &pac_options);
+    if (retval || !pac_options)
+        return retval;
+
+    if (pac_options->options & KRB5_PA_PAC_OPTIONS_RBCD)
+        *supported = TRUE;
+
+    free(pac_options);
+    return 0;
 }
 
 /*
