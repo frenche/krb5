@@ -559,6 +559,12 @@ typedef struct _krb5_secure_cookie {
     krb5_pa_data **data;
 } krb5_secure_cookie;
 
+typedef struct _krb5_pa_pac_options {
+    krb5_flags options;
+} krb5_pa_pac_options;
+
+#define KRB5_PA_PAC_OPTIONS_RBCD 0x10000000
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -861,6 +867,13 @@ typedef struct _krb5_cammac {
 krb5_pa_data *
 krb5int_find_pa_data(krb5_context, krb5_pa_data *const *, krb5_preauthtype);
 /* Does not return a copy; original padata sequence responsible for freeing*/
+
+/* Given data, length and PA type, allocate a pa data and add it to a list.
+ * If called with NULL, a new one-element list is returned.
+ * The data will be owned by the list on success.*/
+krb5_error_code
+k5_add_pa_data_element(krb5_preauthtype, size_t, krb5_octet *,
+                       krb5_pa_data ***);
 
 void krb5_free_etype_info(krb5_context, krb5_etype_info);
 
@@ -1519,6 +1532,9 @@ encode_utf8_strings(krb5_data *const *ut8fstrings, krb5_data **);
 krb5_error_code
 encode_krb5_secure_cookie(const krb5_secure_cookie *, krb5_data **);
 
+krb5_error_code
+encode_krb5_pa_pac_options(const krb5_pa_pac_options *, krb5_data **);
+
 /*************************************************************************
  * End of prototypes for krb5_encode.c
  *************************************************************************/
@@ -1700,6 +1716,9 @@ decode_utf8_strings(const krb5_data *, krb5_data ***);
 
 krb5_error_code
 decode_krb5_secure_cookie(const krb5_data *, krb5_secure_cookie **);
+
+krb5_error_code
+decode_krb5_pa_pac_options(const krb5_data *, krb5_pa_pac_options **);
 
 struct _krb5_key_data;          /* kdb.h */
 

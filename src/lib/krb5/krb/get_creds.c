@@ -250,6 +250,38 @@ cache_get(krb5_context context, krb5_ccache ccache, krb5_flags flags,
     return 0;
 }
 
+static krb5_error_code
+construct_in_padata(krb5_context context, krb5_tkt_creds_context ctx,
+                    krb5_pa_data ***in_padata)
+{
+    krb5_error_code code = 0;
+
+    if ((ctx->kdcopt & KDC_OPT_CNAME_IN_ADDL_TKT) &&
+        (ctx->kdcopt & KDC_OPT_CANONICALIZE)) {
+        krb5_pa_pac_options pac_options;
+        krb5_data *pac_options_data = NULL;
+
+        memset(&pac_options, 0, sizeof(pac_options));
+        pac_options.options |= KRB5_PA_PAC_OPTIONS_RBCD;
+
+        code = encode_krb5_pa_pac_options(&pac_options, &pac_options_data);
+        if (code != 0)
+            return code;
+
+        code = k5_add_pa_data_element(KRB5_PADATA_PAC_OPTIONS,
+                                      pac_options_data->length,
+                                      (krb5_octet *)pac_options_data->data,
+                                      in_padata);
+        if (code != 0)
+            free(pac_options_data->data);
+
+        free(pac_options_data);
+        pac_options_data = NULL;
+    }
+
+    return code;
+}
+
 /*
  * Set up the request given by ctx->tgs_in_creds, using ctx->cur_tgt.  KDC
  * options for the requests are determined by ctx->cur_tgt->ticket_flags and
@@ -261,6 +293,7 @@ make_request(krb5_context context, krb5_tkt_creds_context ctx,
 {
     krb5_error_code code;
     krb5_data request = empty_data();
+    krb5_pa_data **in_padata = NULL;
 
     ctx->kdcopt = extra_options | FLAGS2OPTS(ctx->cur_tgt->ticket_flags);
 
@@ -275,12 +308,17 @@ make_request(krb5_context context, krb5_tkt_creds_context ctx,
     if (code)
         return code;
 
+    code = construct_in_padata(context, ctx, &in_padata);
+    if (code)
+        return code;
+
     krb5_free_keyblock(context, ctx->subkey);
     ctx->subkey = NULL;
     code = k5_make_tgs_req(context, ctx->fast_state, ctx->cur_tgt, ctx->kdcopt,
-                           ctx->cur_tgt->addresses, NULL, ctx->tgs_in_creds,
+                           ctx->cur_tgt->addresses, in_padata, ctx->tgs_in_creds,
                            NULL, NULL, &request, &ctx->timestamp, &ctx->nonce,
                            &ctx->subkey);
+    krb5_free_pa_data(context, in_padata);
     if (code != 0)
         return code;
 
