@@ -136,6 +136,7 @@ enum state {
     STATE_GET_TGT,              /* Getting TGT for service realm */
     STATE_GET_TGT_OFFPATH,      /* Getting TGT via off-path referrals */
     STATE_REFERRALS,            /* Retrieving service ticket or referral */
+    STATE_RBCD_REFERRALS,       /* Chase RBCD referrals */
     STATE_NON_REFERRAL,         /* Non-referral service ticket request */
     STATE_COMPLETE              /* Creds ready for retrieval */
 };
@@ -156,6 +157,8 @@ struct _krb5_tkt_creds_context {
 
     /* The following fields are used in multiple steps. */
     krb5_creds *cur_tgt;        /* TGT to be used for next query */
+    krb5_creds *second_referral;/* TGT to be used for next query */
+    krb5_creds *self_referral;  /* TGT to be used for next query */
     krb5_data *realms_seen;     /* For loop detection */
 
     /* The following fields track state between request and reply. */
@@ -620,6 +623,149 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
         krb5_free_authdata(context, ctx->in_creds->authdata);
         ctx->in_creds->authdata = NULL;
     }
+
+    if (ctx->kdcopt & KDC_OPT_CNAME_IN_ADDL_TKT) {
+        assert(ctx->referral_count == 1);
+        ctx->second_referral = ctx->reply_creds;
+        ctx->reply_creds = NULL;
+
+        ctx->in_creds->second_ticket.length = 0;
+        free(ctx->in_creds->second_ticket.data);
+        ctx->in_creds->second_ticket.data = NULL;
+
+        ctx->req_kdcopt &= ~KDC_OPT_CNAME_IN_ADDL_TKT;
+        ctx->state = STATE_RBCD_REFERRALS;
+
+        return make_request_for_service(context, ctx, TRUE);
+    }
+
+    /* Give up if we've gotten too many referral TGTs. */
+    if (ctx->referral_count++ >= KRB5_REFERRAL_MAXHOPS)
+        return KRB5_KDC_UNREACH;
+
+    /* Check for referral loops. */
+    if (seen_realm_before(context, ctx, referral_realm))
+        return KRB5_KDC_UNREACH;
+    code = remember_realm(context, ctx, referral_realm);
+    if (code != 0)
+        return code;
+
+    /* Use the referral TGT for the next request. */
+    krb5_free_creds(context, ctx->cur_tgt);
+    ctx->cur_tgt = ctx->reply_creds;
+    ctx->reply_creds = NULL;
+    TRACE_TKT_CREDS_REFERRAL(context, ctx->cur_tgt->server);
+
+    /* Rewrite the server realm to be the referral realm. */
+    krb5_free_data_contents(context, &ctx->server->realm);
+    code = krb5int_copy_data_contents(context, referral_realm,
+                                      &ctx->server->realm);
+    if (code != 0)
+        return code;
+
+    /* Generate the next referral request. */
+    return make_request_for_service(context, ctx, TRUE);
+}
+
+static krb5_error_code
+step_rbcd_referrals(krb5_context context, krb5_tkt_creds_context ctx)
+{
+    krb5_error_code code;
+    const krb5_data *referral_realm;
+
+    if (ctx->reply_code != 0)
+        return ctx->reply_code;
+
+    if (krb5_principal_compare(context, ctx->reply_creds->server,
+                               ctx->server)) {
+        if ((ctx->kdcopt & KDC_OPT_CNAME_IN_ADDL_TKT) == 0) {
+            if (ctx->second_referral != NULL) {
+                /* We are after the tgt, not the ticket */
+                krb5_free_creds(context, ctx->reply_creds);
+                ctx->reply_creds = NULL;
+
+                if (!krb5_principal_compare_any_realm(context,
+                                                      ctx->second_referral->server,
+                                                      ctx->cur_tgt->server)) {
+                    ctx->self_referral = ctx->cur_tgt;
+                    ctx->cur_tgt = ctx->second_referral;
+                    ctx->second_referral = NULL;
+
+                    krb5_free_principal(context, ctx->in_creds->server);
+                    ctx->in_creds->server = NULL;
+                    code = krb5_copy_principal(context,
+                                               ctx->self_referral->server,
+                                               &ctx->in_creds->server);
+                    if (code != 0)
+                        return code;
+
+                    ctx->server = ctx->in_creds->server;
+                    krb5_free_data_contents(context, &ctx->server->realm);
+                    code = krb5int_copy_data_contents(context,
+                                                      &ctx->cur_tgt->server->data[1],
+                                                      &ctx->server->realm);
+                    if (code != 0)
+                        return code;
+
+                    krb5int_free_data_list(context, ctx->realms_seen);
+                    ctx->realms_seen = NULL;
+
+                    return make_request_for_service(context, ctx, TRUE);
+                }
+
+                ctx->reply_creds = ctx->second_referral;
+                ctx->second_referral = NULL;
+            } else {
+                krb5_free_creds(context, ctx->cur_tgt);
+                ctx->cur_tgt = ctx->self_referral;
+                ctx->self_referral = NULL;
+            }
+
+            krb5_free_principal(context, ctx->in_creds->server);
+            ctx->in_creds->server = NULL;
+            code = krb5_copy_principal(context, ctx->req_server, &ctx->in_creds->server);
+            if (code != 0)
+                return code;
+
+            ctx->server = ctx->in_creds->server;
+            krb5_free_data_contents(context, &ctx->server->realm);
+            code = krb5int_copy_data_contents(context,
+                                              &ctx->cur_tgt->server->data[1],
+                                              &ctx->server->realm);
+
+            ctx->in_creds->second_ticket = ctx->reply_creds->ticket;
+            ctx->reply_creds->ticket = empty_data();
+
+            ctx->req_kdcopt |= KDC_OPT_CNAME_IN_ADDL_TKT;
+            return make_request_for_service(context, ctx, TRUE);
+        }
+
+        /* We got the ticket we asked for... but we didn't necessarily ask for
+         * it with the right enctypes.  Try a non-referral request if so. */
+        if (wrong_enctype(context, ctx->reply_creds->keyblock.enctype)) {
+            TRACE_TKT_CREDS_WRONG_ENCTYPE(context);
+            return KRB5_KDC_UNREACH; //XXX
+        }
+
+        return complete(context, ctx);
+    }
+
+    /* Old versions of Active Directory can rewrite the server name instead of
+     * returning a referral.  Try a non-referral query if we see this. */
+    if (!IS_TGS_PRINC(ctx->reply_creds->server)) {
+        TRACE_TKT_CREDS_NON_TGT(context, ctx->reply_creds->server);
+        return KRB5_KDC_UNREACH;
+    }
+
+    /* Active Directory may return a TGT to the local realm.  Try a
+     * non-referral query if we see this. */
+    referral_realm = &ctx->reply_creds->server->data[1];
+    if (data_eq(*referral_realm, ctx->cur_tgt->server->data[1])) {
+        TRACE_TKT_CREDS_SAME_REALM_TGT(context, referral_realm);
+        return KRB5_KDC_UNREACH;
+    }
+
+    /* XXX: same as the tail of step_referrals() */
 
     /* Give up if we've gotten too many referral TGTs. */
     if (ctx->referral_count++ >= KRB5_REFERRAL_MAXHOPS)
@@ -1199,6 +1345,8 @@ krb5_tkt_creds_free(krb5_context context, krb5_tkt_creds_context ctx)
     krb5_free_principal(context, ctx->req_server);
     krb5_free_authdata(context, ctx->authdata);
     krb5_free_creds(context, ctx->cur_tgt);
+    krb5_free_creds(context, ctx->second_referral);
+    krb5_free_creds(context, ctx->self_referral);
     krb5int_free_data_list(context, ctx->realms_seen);
     krb5_free_principal(context, ctx->tgt_princ);
     krb5_free_keyblock(context, ctx->subkey);
@@ -1282,6 +1430,8 @@ krb5_tkt_creds_step(krb5_context context, krb5_tkt_creds_context ctx,
         return step_get_tgt_offpath(context, ctx);
     else if (ctx->state == STATE_REFERRALS)
         return step_referrals(context, ctx);
+    else if (ctx->state == STATE_RBCD_REFERRALS)
+        return step_rbcd_referrals(context, ctx);
     else if (ctx->state == STATE_NON_REFERRAL)
         return step_non_referral(context, ctx);
     else
