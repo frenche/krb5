@@ -156,6 +156,7 @@ struct _krb5_tkt_creds_context {
 
     /* The following fields are used in multiple steps. */
     krb5_creds *cur_tgt;        /* TGT to be used for next query */
+    krb5_creds *second_referral;/* TGT to be used for next query */
     krb5_data *realms_seen;     /* For loop detection */
 
     /* The following fields track state between request and reply. */
@@ -371,6 +372,7 @@ make_request_for_service(krb5_context context, krb5_tkt_creds_context ctx,
 
     /* Automatically set the enc-tkt-in-skey flag for user-to-user requests. */
     if (ctx->in_creds->second_ticket.length != 0 &&
+        ctx->second_referral == NULL &&
         (extra_options & KDC_OPT_CNAME_IN_ADDL_TKT) == 0)
         extra_options |= KDC_OPT_ENC_TKT_IN_SKEY;
 
@@ -619,6 +621,19 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
          * final credentials, so we don't need to request it again. */
         krb5_free_authdata(context, ctx->in_creds->authdata);
         ctx->in_creds->authdata = NULL;
+    }
+
+    if (ctx->kdcopt & KDC_OPT_CNAME_IN_ADDL_TKT) {
+        ctx->second_referral = ctx->reply_creds;
+        ctx->reply_creds = NULL;
+        ctx->req_kdcopt &= ~KDC_OPT_CNAME_IN_ADDL_TKT;
+        return make_request_for_service(context, ctx, TRUE);
+    }
+
+    if (ctx->second_referral != NULL) {
+        ctx->in_creds->second_ticket = ctx->second_referral->ticket;
+        ctx->req_kdcopt |= KDC_OPT_CNAME_IN_ADDL_TKT;
+        ctx->second_referral = NULL; // XXX free me
     }
 
     /* Give up if we've gotten too many referral TGTs. */
