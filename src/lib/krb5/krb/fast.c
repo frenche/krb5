@@ -635,6 +635,37 @@ krb5int_find_pa_data(krb5_context context, krb5_pa_data *const *padata,
     return *tmppa;
 }
 
+krb5_error_code
+k5_add_pa_data_element(krb5_preauthtype pa_type, size_t len,
+                       krb5_octet *data, krb5_pa_data ***list)
+{
+    krb5_pa_data *pa;
+    size_t count;
+    krb5_pa_data **newlist;
+
+    pa = malloc(sizeof(*pa));
+    if (pa == NULL) {
+        return ENOMEM;
+    }
+    pa->magic = KV5M_PA_DATA;
+    pa->pa_type = pa_type;
+    pa->length = len;
+    pa->contents = data;
+
+    for (count = 0; *list != NULL && (*list)[count] != NULL; count++);
+
+    newlist = realloc(*list, (count + 2) * sizeof(*newlist));
+    if (newlist == NULL) {
+        free(pa->contents);
+        free(pa);
+        return ENOMEM;
+    }
+    newlist[count] = pa;
+    newlist[count + 1] = NULL;
+    *list = newlist;
+    return 0;
+}
+
 /*
  * Implement FAST negotiation as specified in RFC 6806 section 11.  If
  * the encrypted part of rep sets the enc-pa-rep flag, look for and
