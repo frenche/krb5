@@ -261,8 +261,45 @@ make_request(krb5_context context, krb5_tkt_creds_context ctx,
 {
     krb5_error_code code;
     krb5_data request = empty_data();
+    krb5_pa_data **in_padata = NULL;
 
     ctx->kdcopt = extra_options | FLAGS2OPTS(ctx->cur_tgt->ticket_flags);
+
+    if (ctx->kdcopt & KDC_OPT_CNAME_IN_ADDL_TKT) {
+        krb5_pa_pac_options pac_options;
+        krb5_data *pac_options_data = NULL;
+        krb5_pa_data *padata;
+
+        in_padata = calloc(2, sizeof(krb5_pa_data *));
+        if (in_padata == NULL)
+            return ENOMEM;
+
+        padata = malloc(sizeof(*padata));
+        if (padata == NULL) {
+            krb5_free_pa_data(context, in_padata);
+            return ENOMEM;
+        }
+
+        memset(&pac_options, 0, sizeof(pac_options));
+        pac_options.options |= 0x10000000;
+
+        code = encode_krb5_pa_pac_options(&pac_options, &pac_options_data);
+        if (code != 0) {
+            // free
+            return code;
+        }
+
+        padata->magic = KV5M_PA_DATA;
+        padata->pa_type = 167;
+        padata->length = pac_options_data->length;
+        padata->contents = (krb5_octet *)pac_options_data->data;
+
+        free(pac_options_data);
+        pac_options_data = NULL;
+
+        in_padata[0] = padata;
+        in_padata[1] = NULL;
+    }
 
     /* XXX This check belongs in gc_via_tgt.c or nowhere. */
     if (!krb5_c_valid_enctype(ctx->cur_tgt->keyblock.enctype))
@@ -278,12 +315,13 @@ make_request(krb5_context context, krb5_tkt_creds_context ctx,
     krb5_free_keyblock(context, ctx->subkey);
     ctx->subkey = NULL;
     code = k5_make_tgs_req(context, ctx->fast_state, ctx->cur_tgt, ctx->kdcopt,
-                           ctx->cur_tgt->addresses, NULL, ctx->tgs_in_creds,
+                           ctx->cur_tgt->addresses, in_padata, ctx->tgs_in_creds,
                            NULL, NULL, &request, &ctx->timestamp, &ctx->nonce,
                            &ctx->subkey);
     if (code != 0)
         return code;
 
+    krb5_free_pa_data(context, in_padata);
     krb5_free_data_contents(context, &ctx->previous_request);
     ctx->previous_request = request;
     return set_caller_request(context, ctx);
