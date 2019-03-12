@@ -267,7 +267,7 @@ kg_compose_deleg_cred(OM_uint32 *minor_status,
      * Submitting non-forwardable credentials to the KDC for use
      * with constrained delegation will only return an error.
      */
-    if (subject_creds->ticket_flags & TKT_FLG_FORWARDABLE) {
+    if (1 || subject_creds->ticket_flags & TKT_FLG_FORWARDABLE) {
         code = make_proxy_cred(context, cred, impersonator_cred);
         if (code != 0)
             goto cleanup;

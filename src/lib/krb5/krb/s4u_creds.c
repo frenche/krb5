@@ -767,7 +767,7 @@ krb5_get_credentials_for_proxy(krb5_context context,
         goto cleanup;
     }
 
-    if ((evidence_tkt->enc_part2->flags & TKT_FLG_FORWARDABLE) == 0) {
+    if (0 && (evidence_tkt->enc_part2->flags & TKT_FLG_FORWARDABLE) == 0) {
         code = KRB5_TKT_NOT_FORWARDABLE;
         goto cleanup;
     }
