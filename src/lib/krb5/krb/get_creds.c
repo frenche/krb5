@@ -157,6 +157,8 @@ struct _krb5_tkt_creds_context {
     /* The following fields are used in multiple steps. */
     krb5_creds *cur_tgt;        /* TGT to be used for next query */
     krb5_creds *second_referral;/* TGT to be used for next query */
+    krb5_creds *main_referral;/* TGT to be used for next query */
+    krb5_creds *main_creds;/* TGT to be used for next query */
     krb5_data *realms_seen;     /* For loop detection */
 
     /* The following fields track state between request and reply. */
@@ -591,6 +593,47 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
 
     if (krb5_principal_compare(context, ctx->reply_creds->server,
                                ctx->server)) {
+        /* XXX */
+        if (ctx->second_referral != NULL) {
+            if (!IS_TGS_PRINC(ctx->reply_creds->server)) {
+                ctx->main_creds = ctx->reply_creds;
+                ctx->reply_creds = NULL;
+
+                ctx->main_referral = ctx->cur_tgt;
+                if (!krb5_principal_compare_any_realm(context,
+                                                      ctx->second_referral->server,
+                                                      ctx->main_referral->server)) {
+                    ctx->cur_tgt = ctx->second_referral;
+                    code = krb5_copy_principal(context, ctx->main_referral->server, &ctx->in_creds->server);
+                    if (code != 0)
+                        return code;
+
+                    ctx->server = ctx->in_creds->server;
+                    krb5_free_data_contents(context, &ctx->server->realm);
+                    code = krb5int_copy_data_contents(context,
+                                                      &ctx->cur_tgt->server->data[1],
+                                                      &ctx->server->realm);
+                    if (code != 0)
+                        return code;
+                    return make_request_for_service(context, ctx, TRUE);
+                }
+
+                ctx->reply_creds = ctx->second_referral;
+            }
+            ctx->cur_tgt = ctx->main_referral;
+
+            code = krb5_copy_principal(context, ctx->main_creds->server, &ctx->in_creds->server);
+            if (code != 0)
+                return code;
+
+            ctx->server = ctx->in_creds->server;
+            ctx->in_creds->second_ticket = ctx->reply_creds->ticket;
+
+            ctx->req_kdcopt |= KDC_OPT_CNAME_IN_ADDL_TKT;
+            ctx->second_referral = NULL; // XXX free me
+            return make_request_for_service(context, ctx, TRUE);
+        }
+
         /* We got the ticket we asked for... but we didn't necessarily ask for
          * it with the right enctypes.  Try a non-referral request if so. */
         if (wrong_enctype(context, ctx->reply_creds->keyblock.enctype)) {
@@ -630,12 +673,6 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
         return make_request_for_service(context, ctx, TRUE);
     }
 
-    if (ctx->second_referral != NULL) {
-        ctx->in_creds->second_ticket = ctx->second_referral->ticket;
-        ctx->req_kdcopt |= KDC_OPT_CNAME_IN_ADDL_TKT;
-        ctx->second_referral = NULL; // XXX free me
-    }
-
     /* Give up if we've gotten too many referral TGTs. */
     if (ctx->referral_count++ >= KRB5_REFERRAL_MAXHOPS)
         return KRB5_KDC_UNREACH;
@@ -643,12 +680,13 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
     /* Check for referral loops. */
     if (seen_realm_before(context, ctx, referral_realm))
         return KRB5_KDC_UNREACH;
-    code = remember_realm(context, ctx, referral_realm);
-    if (code != 0)
-        return code;
-
+    if (ctx->second_referral == NULL) {
+        code = remember_realm(context, ctx, referral_realm);
+        if (code != 0)
+            return code;
+    }
     /* Use the referral TGT for the next request. */
-    krb5_free_creds(context, ctx->cur_tgt);
+    //krb5_free_creds(context, ctx->cur_tgt);
     ctx->cur_tgt = ctx->reply_creds;
     ctx->reply_creds = NULL;
     TRACE_TKT_CREDS_REFERRAL(context, ctx->cur_tgt->server);
@@ -1209,7 +1247,7 @@ krb5_tkt_creds_free(krb5_context context, krb5_tkt_creds_context ctx)
     if (ctx == NULL)
         return;
     krb5int_fast_free_state(context, ctx->fast_state);
-    krb5_free_creds(context, ctx->in_creds);
+    //krb5_free_creds(context, ctx->in_creds);
     krb5_cc_close(context, ctx->ccache);
     krb5_free_principal(context, ctx->req_server);
     krb5_free_authdata(context, ctx->authdata);
