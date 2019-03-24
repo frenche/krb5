@@ -728,6 +728,45 @@ cleanup:
     return code;
 }
 
+#define UAC_OFFSET 184
+
+static int sensitive_principal(krb5_context context,
+                               krb5_authdata **ticket_authdata)
+{
+    krb5_error_code code;
+    krb5_authdata **authdata = NULL;
+    krb5_pac pac = NULL;
+    krb5_data logon_info;
+    uint32_t uac;
+    unsigned char *p;
+    const uint32_t NOT_DELEGATED = 0x4000; // 0x00100000 per doc, endianness?
+
+    code = krb5_find_authdata(context, ticket_authdata, NULL,
+                              KRB5_AUTHDATA_WIN2K_PAC, &authdata);
+    if (code != 0 || authdata == NULL)
+        return 1;
+
+    code = krb5_pac_parse(context, authdata[0]->contents,
+                          authdata[0]->length, &pac);
+    if (code != 0)
+        return 1;
+
+    code = krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO,
+                               &logon_info);
+    if (code != 0)
+        return 1;
+
+    p = (unsigned char *) logon_info.data;
+    p += UAC_OFFSET;
+
+    uac = load_32_le(p);
+
+    if (uac & NOT_DELEGATED)
+        return 1;
+
+    return 0;
+}
+
 /*
  * Exported API for constrained delegation (S4U2Proxy).
  *
@@ -767,7 +806,10 @@ krb5_get_credentials_for_proxy(krb5_context context,
         goto cleanup;
     }
 
-    if (0 && (evidence_tkt->enc_part2->flags & TKT_FLG_FORWARDABLE) == 0) {
+    /* Assume the PAC was already verified by caller */
+    if ((evidence_tkt->enc_part2->flags & TKT_FLG_FORWARDABLE) == 0 &&
+        sensitive_principal(context,
+                            evidence_tkt->enc_part2->authorization_data)) {
         code = KRB5_TKT_NOT_FORWARDABLE;
         goto cleanup;
     }
