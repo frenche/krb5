@@ -156,6 +156,32 @@ krb5_get_cred_via_tkt(krb5_context context, krb5_creds *tkt,
                                       NULL, NULL, out_cred, NULL);
 }
 
+static krb5_error_code
+check_rbcd_support(krb5_context context,
+                   krb5_pa_data **enc_padata)
+{
+    krb5_error_code retval;
+    krb5_pa_data *padata;
+    krb5_pa_pac_options *pac_options;
+    krb5_data pac_options_data;
+
+    padata = krb5int_find_pa_data(context, enc_padata, 167);
+    if (padata == NULL)
+        return KRB5KDC_ERR_PADATA_TYPE_NOSUPP;
+
+    pac_options_data = make_data(padata->contents, padata->length);
+    retval = decode_krb5_pa_pac_options(&pac_options_data, &pac_options);
+    if (retval != 0)
+        return retval;
+
+    if (!(pac_options->options & 0x10000000))
+        retval = KRB5KDC_ERR_PADATA_TYPE_NOSUPP;
+
+    free(pac_options);
+
+    return retval;
+}
+
 krb5_error_code
 krb5int_process_tgs_reply(krb5_context context,
                           struct krb5int_fast_request_state *fast_state,
@@ -263,6 +289,10 @@ krb5int_process_tgs_reply(krb5_context context,
          */
         if (!krb5_principal_compare(context, dec_rep->client, tkt->client))
             retval = KRB5_KDCREP_MODIFIED;
+    } else if (!tgt_is_local_realm(tkt) ||
+               !krb5_principal_compare(context, in_cred->server,
+                                       dec_rep->enc_part2->server)) {
+        retval = check_rbcd_support(context, dec_rep->enc_part2->enc_padata);
     }
 
     if (retval == 0)
