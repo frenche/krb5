@@ -77,6 +77,16 @@ realm.run(['./t_s4u', puser, pservice2], expected_code=1,
 realm.run(['./t_s4u', '--spnego', puser, pservice2], expected_code=1,
           expected_msg='NOT_ALLOWED_TO_DELEGATE')
 
+# If the user has DelegationNotAllowed set, no forwardable or proxiable
+# tickets should be issued for them
+realm.run([kadminl, 'modprinc', '+delegation_not_allowed', realm.user_princ])
+output = realm.run(['./t_s4u', puser, pservice2], expected_code=1)
+if ('EVIDENCE_TKT_NOT_FORWARDABLE' not in output):
+    fail('s4u2self')
+output = realm.run(['./t_s4u', '--spnego', puser, pservice2], expected_code=1)
+if ('EVIDENCE_TKT_NOT_FORWARDABLE' not in output):
+    fail('s4u2self (SPNEGO)')
+
 realm.stop()
 
 # Set up a realm using the test KDB module so that we can do

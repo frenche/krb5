@@ -26,6 +26,7 @@ KRB5_KDB_OK_AS_DELEGATE         = 0x00100000
 KRB5_KDB_OK_TO_AUTH_AS_DELEGATE = 0x00200000
 KRB5_KDB_NO_AUTH_DATA_REQUIRED  = 0x00400000
 KRB5_KDB_LOCKDOWN_KEYS          = 0x00800000
+KRB5_KDB_DELEGATION_NOT_ALLOWED = 0x01000000
 
 # Input tables -- list of tuples of the form (name, flag, invert)
 
@@ -48,6 +49,7 @@ _kadmin_pflags = [
     ("ok_to_auth_as_delegate",  KRB5_KDB_OK_TO_AUTH_AS_DELEGATE, False),
     ("no_auth_data_required",   KRB5_KDB_NO_AUTH_DATA_REQUIRED, False),
     ("lockdown_keys",           KRB5_KDB_LOCKDOWN_KEYS,         False),
+    ("delegation_not_allowed",  KRB5_KDB_DELEGATION_NOT_ALLOWED, False),
 ]
 
 # Input forms from lib/kadm5/str_conv.c
@@ -69,6 +71,7 @@ _strconv_pflags = [
     ("ok-to-auth-as-delegate",  KRB5_KDB_OK_TO_AUTH_AS_DELEGATE, False),
     ("no-auth-data-required",   KRB5_KDB_NO_AUTH_DATA_REQUIRED, False),
     ("lockdown-keys",           KRB5_KDB_LOCKDOWN_KEYS,         False),
+    ("delegation-not-allowed",  KRB5_KDB_DELEGATION_NOT_ALLOWED, False),
 ]
 
 # kdb.h symbol prefix
