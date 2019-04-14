@@ -61,6 +61,7 @@ print_flags(unsigned int flags)
         "OK_AS_DELEGATE",         /* 0x00100000 */
         "OK_TO_AUTH_AS_DELEGATE", /* 0x00200000 */
         "NO_AUTH_DATA_REQUIRED",  /* 0x00400000 */
+        "DELEGATION_NOT_ALLOWED", /* 0x01000000 */
 
     };
 
