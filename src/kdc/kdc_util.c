@@ -763,7 +763,8 @@ get_ticket_flags(krb5_flags reqflags, krb5_db_entry *client,
         flags |= TKT_FLG_OK_AS_DELEGATE;
 
     /* Unset PROXIABLE if it is disallowed. */
-    if (client != NULL && (client->attributes & KRB5_KDB_DISALLOW_PROXIABLE))
+    if (client != NULL && (client->attributes & (KRB5_KDB_DISALLOW_PROXIABLE
+                                         | KRB5_KDB_DELEGATION_NOT_ALLOWED)))
         flags &= ~TKT_FLG_PROXIABLE;
     if (server->attributes & KRB5_KDB_DISALLOW_PROXIABLE)
         flags &= ~TKT_FLG_PROXIABLE;
@@ -771,7 +772,8 @@ get_ticket_flags(krb5_flags reqflags, krb5_db_entry *client,
         flags &= ~TKT_FLG_PROXIABLE;
 
     /* Unset FORWARDABLE if it is disallowed. */
-    if (client != NULL && (client->attributes & KRB5_KDB_DISALLOW_FORWARDABLE))
+    if (client != NULL && (client->attributes & (KRB5_KDB_DISALLOW_FORWARDABLE
+                                           | KRB5_KDB_DELEGATION_NOT_ALLOWED)))
         flags &= ~TKT_FLG_FORWARDABLE;
     if (server->attributes & KRB5_KDB_DISALLOW_FORWARDABLE)
         flags &= ~TKT_FLG_FORWARDABLE;
