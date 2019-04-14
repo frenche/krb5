@@ -91,6 +91,7 @@ static const struct flag_table_row ftbl[] = {
     {"ok_to_auth_as_delegate",  KRB5_KDB_OK_TO_AUTH_AS_DELEGATE, 0},
     {"no_auth_data_required",   KRB5_KDB_NO_AUTH_DATA_REQUIRED, 0},
     {"lockdown_keys",           KRB5_KDB_LOCKDOWN_KEYS,         0},
+    {"delegation_not_allowed",  KRB5_KDB_DELEGATION_NOT_ALLOWED, 0},
 };
 #define NFTBL (sizeof(ftbl) / sizeof(ftbl[0]))
 
@@ -119,6 +120,7 @@ static const char *outflags[] = {
     "OK_TO_AUTH_AS_DELEGATE",   /* 0x00200000 */
     "NO_AUTH_DATA_REQUIRED",    /* 0x00400000 */
     "LOCKDOWN_KEYS",            /* 0x00800000 */
+    "DELEGATION_NOT_ALLOWED",   /* 0x01000000 */
 };
 #define NOUTFLAGS (sizeof(outflags) / sizeof(outflags[0]))
 
