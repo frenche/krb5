@@ -201,12 +201,13 @@ krb5int_process_tgs_reply(krb5_context context,
     krb5_error_code retval;
     krb5_kdc_rep *dec_rep = NULL;
     krb5_error *err_reply = NULL;
-    krb5_boolean s4u2self, is_skey;
+    krb5_boolean s4u, is_skey;
 
-    s4u2self = krb5int_find_pa_data(context, in_padata,
-                                    KRB5_PADATA_S4U_X509_USER) ||
-        krb5int_find_pa_data(context, in_padata,
-                             KRB5_PADATA_FOR_USER);
+    s4u = krb5int_find_pa_data(context, in_padata,
+                               KRB5_PADATA_S4U_X509_USER) ||
+          krb5int_find_pa_data(context, in_padata,
+                               KRB5_PADATA_FOR_USER) ||
+          (kdcoptions & KDC_OPT_CNAME_IN_ADDL_TKT);
 
     if (krb5_is_krb_error(response_data)) {
         retval = decode_krb5_error(response_data, &err_reply);
@@ -279,19 +280,20 @@ krb5int_process_tgs_reply(krb5_context context,
     /* make sure the response hasn't been tampered with..... */
     retval = 0;
 
-    if (s4u2self && !IS_TGS_PRINC(dec_rep->ticket->server)) {
-        /* Final hop, check whether KDC supports S4U2Self */
+    if (s4u && !IS_TGS_PRINC(dec_rep->ticket->server)) {
+        /* Final hop, check whether KDC supports S4U */
         if (krb5_principal_compare(context, dec_rep->client, in_cred->server))
             retval = KRB5KDC_ERR_PADATA_TYPE_NOSUPP;
-    } else if ((kdcoptions & KDC_OPT_CNAME_IN_ADDL_TKT) == 0) {
+    } else {
         /* XXX for constrained delegation this check must be performed by caller
          * as we don't have access to the key to decrypt the evidence ticket.
          */
         if (!krb5_principal_compare(context, dec_rep->client, tkt->client))
             retval = KRB5_KDCREP_MODIFIED;
-    } else if (!tgt_is_local_realm(tkt) ||
-               !krb5_principal_compare(context, in_cred->server,
-                                       dec_rep->enc_part2->server)) {
+    }
+
+    if (0 && (kdcoptions & KDC_OPT_CNAME_IN_ADDL_TKT) && (!tgt_is_local_realm(tkt)
+        || IS_TGS_PRINC(dec_rep->ticket->server))) {
         retval = check_rbcd_support(context, dec_rep->enc_part2->enc_padata);
     }
 

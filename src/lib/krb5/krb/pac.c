@@ -400,11 +400,10 @@ k5_seconds_since_1970_to_time(krb5_timestamp elapsedSeconds, uint64_t *ntTime)
 }
 
 krb5_error_code
-k5_pac_validate_client(krb5_context context,
+k5_pac_get_client_info(krb5_context context,
                        const krb5_pac pac,
-                       krb5_timestamp authtime,
-                       krb5_const_principal principal,
-                       krb5_boolean with_realm)
+                       krb5_timestamp *out_authtime,
+                       char **out_princname)
 {
     krb5_error_code ret;
     krb5_data client_info;
@@ -413,8 +412,6 @@ k5_pac_validate_client(krb5_context context,
     krb5_timestamp pac_authtime;
     krb5_ui_2 pac_princname_length;
     int64_t pac_nt_authtime;
-    krb5_principal pac_principal;
-    int flags = 0;
 
     ret = k5_pac_locate_buffer(context, pac, KRB5_PAC_CLIENT_INFO,
                                &client_info);
@@ -439,6 +436,30 @@ k5_pac_validate_client(krb5_context context,
         return ERANGE;
 
     ret = k5_utf16le_to_utf8(p, pac_princname_length, &pac_princname);
+    if (ret != 0)
+        return ret;
+
+    if (out_authtime)
+        *out_authtime = pac_authtime;
+    *out_princname = pac_princname;
+
+    return 0;
+}
+
+krb5_error_code
+k5_pac_validate_client(krb5_context context,
+                       const krb5_pac pac,
+                       krb5_timestamp authtime,
+                       krb5_const_principal principal,
+                       krb5_boolean with_realm)
+{
+    krb5_error_code ret;
+    char *pac_princname;
+    krb5_principal pac_principal;
+    krb5_timestamp pac_authtime;
+    int flags = 0;
+
+    ret = k5_pac_get_client_info(context, pac, &pac_authtime, &pac_princname);
     if (ret != 0)
         return ret;
 

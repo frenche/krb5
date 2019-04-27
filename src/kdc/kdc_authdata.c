@@ -318,7 +318,7 @@ fetch_kdb_authdata(krb5_context context, unsigned int flags,
                    krb5_db_entry *client, krb5_db_entry *server,
                    krb5_db_entry *header_server, krb5_keyblock *client_key,
                    krb5_keyblock *server_key, krb5_keyblock *header_key,
-                   krb5_kdc_req *req, krb5_const_principal for_user_princ,
+                   krb5_kdc_req *req, krb5_const_principal altprinc,
                    krb5_enc_tkt_part *enc_tkt_req,
                    krb5_enc_tkt_part *enc_tkt_reply)
 {
@@ -361,7 +361,9 @@ fetch_kdb_authdata(krb5_context context, unsigned int flags,
      * not be changed until the final hop.
      */
     if (isflagset(flags, KRB5_KDB_FLAG_PROTOCOL_TRANSITION))
-        actual_client = client == NULL ? for_user_princ : enc_tkt_req->client;
+        actual_client = client == NULL ? altprinc : enc_tkt_req->client;
+    else if (isflagset(flags, KRB5_KDB_FLAG_CONSTRAINED_DELEGATION))
+        actual_client = altprinc;
     else
         actual_client = enc_tkt_reply->client;
 
@@ -826,7 +828,7 @@ handle_authdata(krb5_context context, unsigned int flags,
                 krb5_db_entry *header_server, krb5_db_entry *local_tgt,
                 krb5_keyblock *client_key, krb5_keyblock *server_key,
                 krb5_keyblock *header_key, krb5_data *req_pkt,
-                krb5_kdc_req *req, krb5_const_principal for_user_princ,
+                krb5_kdc_req *req, krb5_const_principal altprinc,
                 krb5_enc_tkt_part *enc_tkt_req,
                 krb5_data *const *auth_indicators,
                 krb5_enc_tkt_part *enc_tkt_reply)
@@ -851,7 +853,7 @@ handle_authdata(krb5_context context, unsigned int flags,
             h = &authdata_modules[i];
             ret = h->vt.handle(context, h->data, flags, client, server,
                                header_server, client_key, server_key,
-                               header_key, req_pkt, req, for_user_princ,
+                               header_key, req_pkt, req, altprinc,
                                enc_tkt_req, enc_tkt_reply);
             if (ret)
                 kdc_err(context, ret, "from authdata module %s", h->vt.name);
@@ -879,15 +881,14 @@ handle_authdata(krb5_context context, unsigned int flags,
         /* Fetch authdata from the KDB if appropriate. */
         ret = fetch_kdb_authdata(context, flags, client, server, header_server,
                                  client_key, server_key, header_key, req,
-                                 for_user_princ, enc_tkt_req, enc_tkt_reply);
+                                 altprinc, enc_tkt_req, enc_tkt_reply);
         if (ret)
             return ret;
 
         /* Validate and insert AD-SIGNTICKET authdata.  This must happen last
          * since it contains a signature over the other authdata. */
         ret = handle_signticket(context, flags, client, server, local_tgt,
-                                req, for_user_princ, enc_tkt_req,
-                                enc_tkt_reply);
+                                req, altprinc, enc_tkt_req, enc_tkt_reply);
         if (ret)
             return ret;
     }

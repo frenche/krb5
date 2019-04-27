@@ -119,6 +119,7 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
     krb5_keyblock *reply_key = NULL;
     krb5_key_data  *server_key;
     krb5_principal cprinc = NULL, sprinc = NULL, altcprinc = NULL;
+    krb5_principal s4u2proxy_client = NULL;
     krb5_last_req_entry *nolrarray[2], nolrentry;
     int errcode;
     const char        *status = 0;
@@ -247,6 +248,8 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
      * issuing a referral (or alternate TGT, which we treat similarly). */
     is_referral = is_cross_tgs_principal(server->princ) &&
         !krb5_principal_compare(kdc_context, request->server, server->princ);
+    if (is_referral)
+        setflag(c_flags, KRB5_KDB_FLAG_ISSUING_REFERRAL);
 
     au_state->stage = VALIDATE_POL;
 
@@ -306,7 +309,10 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
                                             request->second_ticket[st_idx]->enc_part2,
                                             stkt_server,
                                             header_ticket->enc_part2->client,
+                                            is_referral ? NULL : server,
                                             request->server,
+                                            TRUE,
+                                            &s4u2proxy_client,
                                             &status);
         if (errcode == KDC_ERR_POLICY || errcode == KDC_ERR_BADOPTION)
             au_state->violation = PROT_CONSTRAINT;
@@ -476,7 +482,7 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
     if (isflagset(c_flags, KRB5_KDB_FLAG_PROTOCOL_TRANSITION)) {
         altcprinc = s4u_x509_user->user_id.user;
     } else if (isflagset(c_flags, KRB5_KDB_FLAG_CONSTRAINED_DELEGATION)) {
-        altcprinc = subject_tkt->client;
+        altcprinc = s4u2proxy_client ?: subject_tkt->client;
     } else {
         altcprinc = NULL;
     }
@@ -539,11 +545,10 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
         }
     }
 
-    if (isflagset(c_flags, KRB5_KDB_FLAG_PROTOCOL_TRANSITION) &&
-        !isflagset(c_flags, KRB5_KDB_FLAG_CROSS_REALM))
-        enc_tkt_reply.client = s4u_x509_user->user_id.user;
+    if (isflagset(c_flags, KRB5_KDB_FLAGS_S4U) && !is_referral)
+        enc_tkt_reply.client = altcprinc;
     else
-        enc_tkt_reply.client = subject_tkt->client;
+        enc_tkt_reply.client = header_enc_tkt->client;
 
     enc_tkt_reply.session = &session_key;
     enc_tkt_reply.transited.tr_type = KRB5_DOMAIN_X500_COMPRESS;
@@ -621,8 +626,7 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
                               header_key,
                               pkt,
                               request,
-                              s4u_x509_user ?
-                              s4u_x509_user->user_id.user : NULL,
+                              altcprinc,
                               subject_tkt,
                               auth_indicators,
                               &enc_tkt_reply);
@@ -826,6 +830,7 @@ cleanup:
         krb5_free_authdata(kdc_context, enc_tkt_reply.authorization_data);
     krb5_free_pa_data(kdc_context, e_data);
     k5_free_data_ptr_list(auth_indicators);
+    krb5_free_principal(kdc_context, s4u2proxy_client);
 
     return retval;
 }
