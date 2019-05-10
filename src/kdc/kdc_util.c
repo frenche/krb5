@@ -1904,6 +1904,46 @@ cleanup:
     return retval;
 }
 
+krb5_error_code
+kdc_get_pa_pac_options(krb5_context context, krb5_pa_data **enc_padata,
+                       krb5_pa_pac_options **pac_options)
+{
+    krb5_pa_data *padata;
+    krb5_data pac_options_data;
+
+    padata = krb5int_find_pa_data(context, enc_padata, 167);
+    if (padata == NULL)
+        return 0;
+
+    pac_options_data = make_data(padata->contents, padata->length);
+    return decode_krb5_pa_pac_options(&pac_options_data, pac_options);
+}
+
+krb5_error_code
+kdc_add_pa_pac_options(krb5_context context, krb5_kdc_req *request,
+                       krb5_pa_data ***out_enc_padata)
+{
+    krb5_error_code retval;
+    krb5_pa_pac_options *pac_options = NULL;
+    krb5_data *pac_options_data = NULL;
+
+    retval = kdc_get_pa_pac_options(context, request->padata, &pac_options);
+    if (retval || !pac_options)
+        return retval;
+
+    pac_options->options &= KRB5_PA_PAC_OPTIONS_RBCD;
+
+    retval = encode_krb5_pa_pac_options(pac_options, &pac_options_data);
+    free(pac_options);
+    if (retval)
+        return retval;
+
+    retval = k5_add_pa_data_from_data(out_enc_padata, KRB5_PADATA_PAC_OPTIONS,
+                                      pac_options_data);
+    krb5_free_data(context, pac_options_data);
+    return retval;
+}
+
 /*
  * Although the KDC doesn't call this function directly,
  * process_tcp_connection_read() in net-server.c does call it.
