@@ -1687,64 +1687,6 @@ check_allowed_to_delegate_to(krb5_context context, krb5_const_principal client,
     return krb5_db_check_allowed_to_delegate(context, client, server, proxy);
 }
 
-static krb5_error_code
-check_allowed_to_delegate_from(krb5_context context,
-                               krb5_const_principal client_princ,
-                               krb5_const_principal server_princ,
-                               const krb5_db_entry *proxy)
-{
-    /* XXX kdb method */
-    return 0;
-}
-
-static krb5_error_code
-get_cname_from_authdata(krb5_context context,
-                                  krb5_authdata **in_authdata,
-                                  krb5_principal *client_out)
-{
-    krb5_error_code errcode;
-    krb5_authdata **authdata = NULL;
-    krb5_pac pac = NULL;
-    char *p, *princ_name;
-    int n = 0, flags = KRB5_PRINCIPAL_PARSE_REQUIRE_REALM;
-
-    errcode = krb5_find_authdata(context,
-                                 in_authdata,
-                                 NULL,
-                                 KRB5_AUTHDATA_WIN2K_PAC,
-                                 &authdata);
-    if (errcode != 0 || authdata == NULL)
-        return KRB5KDC_ERR_BADOPTION;
-
-    errcode = krb5_pac_parse(context,
-                             authdata[0]->contents,
-                             authdata[0]->length,
-                             &pac);
-    if (errcode != 0)
-        goto cleanup;
-
-    errcode = krb5_pac_get_client_info(context, pac, NULL, &princ_name);
-    if (errcode != 0)
-        goto cleanup;
-
-    p = princ_name;
-    while(*p++)
-        if (*p == '@')
-            n++;
-
-    if (n == 2)
-        flags |= KRB5_PRINCIPAL_PARSE_ENTERPRISE;
-    //else if (n != 1) error
-
-    errcode = krb5_parse_name_flags(context, princ_name, flags, client_out);
-cleanup:
-    krb5_free_authdata(context, authdata);
-    krb5_pac_free(context, pac);
-    free(princ_name);
-
-    return errcode;
-}
-
 krb5_error_code
 kdc_process_s4u2proxy_req(kdc_realm_t *kdc_active_realm,
                           krb5_kdc_req *request,
@@ -1763,6 +1705,8 @@ kdc_process_s4u2proxy_req(kdc_realm_t *kdc_active_realm,
     errcode = kdc_get_pa_pac_rbcd(kdc_context, request->padata, &support_rbcd);
     if (errcode)
         return errcode;
+
+    support_rbcd = support_rbcd && krb5_db_support_rbcd(kdc_context);
 
     /*
      * Constrained delegation is mutually exclusive with renew/forward/etc.
@@ -1792,9 +1736,9 @@ kdc_process_s4u2proxy_req(kdc_realm_t *kdc_active_realm,
         }
 
         /* Extract client name from authdata */
-        errcode = get_cname_from_authdata(kdc_context,
-                                          t2enc->authorization_data,
-                                          client_out);
+        errcode = krb5_db_get_authdata_info(kdc_context,
+                                            t2enc->authorization_data,
+                                            client_out);
         if (errcode != 0)
             return errcode;
 
@@ -1817,10 +1761,10 @@ kdc_process_s4u2proxy_req(kdc_realm_t *kdc_active_realm,
             return 0;
 	}
 
-        errcode = check_allowed_to_delegate_from(kdc_context,
-                                                 client_princ,
-                                                 server_princ,
-                                                 proxy);
+        errcode = krb5_db_allowed_to_delegate_from(kdc_context,
+                                                   client_princ,
+                                                   server_princ,
+                                                   proxy);
         if (errcode == 0 || errcode != KRB5KDC_ERR_POLICY)
             return errcode;
 

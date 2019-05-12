@@ -375,7 +375,7 @@ fetch_kdb_authdata(krb5_context context, unsigned int flags,
     krbtgt_key = (header_key != NULL) ? header_key : server_key;
 
     tgt_authdata = tgs_req ? enc_tkt_req->authorization_data : NULL;
-    ret = krb5_db_sign_authdata(context, flags, actual_client, client,
+    ret = krb5_db_sign_authdata(context, flags, actual_client, req->server, client,
                                 server, krbtgt, client_key, server_key,
                                 krbtgt_key, enc_tkt_reply->session,
                                 enc_tkt_reply->times.authtime, tgt_authdata,
