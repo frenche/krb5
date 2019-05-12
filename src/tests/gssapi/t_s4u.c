@@ -154,7 +154,8 @@ check_ticket_count(gss_cred_id_t cred, int expected)
     check_k5err(context, "krb5_cc_start_seq_get", ret);
 
     while (!krb5_cc_next_cred(context, ccache, &cur, &kcred)) {
-        if (!krb5_is_config_principal(context, kcred.server))
+        if (!krb5_is_config_principal(context, kcred.server) &&
+            !krb5_is_referral_realm(&kcred.server->realm))
             count++;
         krb5_free_cred_contents(context, &kcred);
     }
