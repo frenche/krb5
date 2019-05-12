@@ -59,6 +59,9 @@
  *             delegation = {
  *                 intermediate_service = target_service
  *             }
+ *             rbcd = {
+ *                 target_service = intermediate_service
+ *             }
  *         }
  *
  * Key values are generated using a hash of the kvno, enctype, salt type, and
@@ -537,25 +540,217 @@ test_encrypt_key_data(krb5_context context, const krb5_keyblock *mkey,
     return 0;
 }
 
+/* Create a PAC with fake logon-info blob */
+static krb5_error_code
+create_pac_db(krb5_context context,
+              krb5_db_entry *client,
+              krb5_pac *out_pac)
+{
+    krb5_data data;
+    krb5_pac pac;
+    char not_delegated;
+
+    not_delegated = (client->attributes & KRB5_KDB_DELEGATION_NOT_ALLOWED) ?
+                    1 : 0;
+    data = make_data(&not_delegated, 1);
+    check(krb5_pac_init(context, &pac));
+    check(krb5_pac_add_buffer(context, pac, KRB5_PAC_LOGON_INFO, &data));
+
+    *out_pac = pac;
+    return 0;
+}
+
+static krb5_error_code
+parse_ticket_pac(krb5_context context,
+                 unsigned int flags,
+                 krb5_const_principal client_princ,
+                 krb5_const_principal server_princ,
+                 krb5_keyblock *server_key,
+                 krb5_keyblock *krbtgt_key,
+                 krb5_timestamp authtime,
+                 krb5_authdata **tgt_auth_data,
+                 krb5_pac *out_pac)
+{
+    krb5_authdata **authdata;
+    krb5_boolean check_realm;
+    krb5_pac pac;
+
+    check(krb5_find_authdata(context, tgt_auth_data, NULL,
+                             KRB5_AUTHDATA_WIN2K_PAC, &authdata));
+    assert(authdata[1] == NULL);
+    check(krb5_pac_parse(context,
+                         authdata[0]->contents,
+                         authdata[0]->length,
+                         &pac));
+    krb5_free_authdata(context, authdata);
+    check_realm = ((flags & KRB5_KDB_FLAGS_S4U) &&
+                   (flags & KRB5_KDB_FLAG_CROSS_REALM)) ? TRUE : FALSE;
+    check(krb5_pac_verify_ext(context, pac, authtime, client_princ, server_key,
+                              (flags & KRB5_KDB_FLAG_CROSS_REALM) ? NULL :
+                              krbtgt_key, check_realm));
+
+    *out_pac = pac;
+    return 0;
+}
+
+typedef struct {
+    char *pac_princ;
+    char *proxy_target;
+    krb5_boolean not_delegated;
+} pac_info;
+
+static void
+free_pac_info_data(pac_info *info)
+{
+    if(info != NULL) {
+      free(info->pac_princ);
+      free(info->proxy_target);
+    }
+    return;
+}
+
+static krb5_error_code
+get_pac_info(krb5_context context, krb5_pac pac, pac_info *info)
+{
+    krb5_data data;
+    size_t len, i;
+    krb5_ui_4 *types = NULL;
+
+    info->proxy_target = NULL;
+    check(krb5_pac_get_client_info(context, pac, NULL, &info->pac_princ));
+    check(krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO, &data));
+    assert(data.length == 1);
+    info->not_delegated = *data.data;
+    krb5_free_data_contents(context, &data);
+
+    check(krb5_pac_get_types(context, pac, &len, &types));
+    for (i = 0; i < len; i++) {
+        if (types[i] != KRB5_PAC_DELEGATION_INFO)
+            continue;
+        check(krb5_pac_get_buffer(context, pac, KRB5_PAC_DELEGATION_INFO,
+                                  &data));
+	info->proxy_target = strndup(data.data, data.length);
+        assert(info->proxy_target != NULL);
+        krb5_free_data_contents(context, &data);
+    }
+    free(types);
+    return 0;
+}
+
+static krb5_error_code
+add_delegation_info(krb5_context context, krb5_pac pac,
+                    krb5_const_principal target_proxy)
+{
+    krb5_data data;
+    char *proxy_name;
+    check(krb5_unparse_name_flags(context, target_proxy,
+                                  KRB5_PRINCIPAL_UNPARSE_NO_REALM,
+                                  &proxy_name));
+    data = make_data(proxy_name, strlen(proxy_name));
+    check(krb5_pac_add_buffer(context, pac, KRB5_PAC_DELEGATION_INFO, &data));
+    krb5_free_unparsed_name(context, proxy_name);
+    return 0;
+}
+
+static krb5_error_code
+handle_delegation_info(krb5_context context, krb5_boolean is_referral,
+                       krb5_pac pac, pac_info *info,
+                       krb5_const_principal server_princ)
+{
+    krb5_principal current_proxy;
+    if (is_referral) {
+        assert(info->proxy_target != NULL);
+        check(krb5_parse_name_flags(context,
+                                    info->proxy_target,
+                                    KRB5_PRINCIPAL_PARSE_NO_REALM,
+                                    &current_proxy));
+        assert(krb5_principal_compare_any_realm(context,
+                                                server_princ,
+                                                current_proxy));
+        krb5_free_principal(context, current_proxy);
+    } else
+        check(add_delegation_info(context, pac, server_princ));
+    return 0;
+}
+
+static krb5_error_code
+encode_pac_ad(krb5_context context, krb5_data *pac_data, krb5_authdata **out)
+{
+    krb5_authdata **list, **out_list, *pac_ad;
+
+    pac_ad = ealloc(sizeof(*pac_ad));
+    pac_ad->magic = KV5M_AUTHDATA;
+    pac_ad->ad_type = KRB5_AUTHDATA_WIN2K_PAC;
+    pac_ad->contents = (krb5_octet *)pac_data->data;;
+    pac_ad->length = pac_data->length;
+    list = ealloc(2 * sizeof(*list));
+    list[0] = pac_ad;
+    list[1] = NULL;
+
+    check(krb5_encode_authdata_container(context,
+                                         KRB5_AUTHDATA_IF_RELEVANT,
+                                         list, &out_list));
+    assert(out_list[1] == NULL);
+    *out = out_list[0];
+    free(out_list);
+    krb5_free_authdata(context, list);
+    return 0;
+}
+
+
 static krb5_error_code
 test_sign_authdata(krb5_context context, unsigned int flags,
-                   krb5_const_principal client_princ, krb5_db_entry *client,
+                   krb5_const_principal client_princ,
+                   krb5_db_entry *client,
                    krb5_db_entry *server, krb5_db_entry *krbtgt,
                    krb5_keyblock *client_key, krb5_keyblock *server_key,
                    krb5_keyblock *krbtgt_key, krb5_keyblock *session_key,
                    krb5_timestamp authtime, krb5_authdata **tgt_auth_data,
                    krb5_authdata ***signed_auth_data)
 {
-    krb5_authdata **list, *ad;
+    krb5_authdata **list, *pac_ad_ifr, *ad;
+    krb5_boolean sign_realm;
+    krb5_boolean new_pac;
+    krb5_data pac_data;
+    krb5_pac pac;
+    pac_info info;
+
+    new_pac = ((flags & KRB5_KDB_FLAG_CLIENT_REFERRALS_ONLY) ||
+               ((flags & KRB5_KDB_FLAG_PROTOCOL_TRANSITION) &&
+                !(flags & KRB5_KDB_FLAG_CROSS_REALM)));
+    if (new_pac) {
+        check(create_pac_db(context, client, &pac));
+    } else {
+        check(parse_ticket_pac(context, flags, client_princ, server_princ,
+                               (flags & KRB5_KDB_FLAG_CONSTRAINED_DELEGATION)
+                               ? client_key : krbtgt_key, krbtgt_key,
+                               authtime, tgt_auth_data, &pac));
+        check(get_pac_info(context, pac, &info));
+        if (flags & KRB5_KDB_FLAG_CONSTRAINED_DELEGATION) {
+            assert(info.not_delegated == 0);
+            check(handle_delegation_info(context,
+                                         (flags & KRB5_KDB_FLAG_CROSS_REALM),
+                                         pac, &info, server_princ));
+        }
+        free_pac_info_data(&info);
+    }
+
+    sign_realm = ((flags & KRB5_KDB_FLAGS_S4U) &&
+                  (flags & KRB5_KDB_FLAG_ISSUING_REFERRAL));
+    check(krb5_pac_sign_ext(context, pac, authtime, client_princ,
+                            server_key, krbtgt_key, sign_realm,
+                            &pac_data));
+    check(encode_pac_ad(context, &pac_data, &pac_ad_ifr));
 
     ad = ealloc(sizeof(*ad));
     ad->magic = KV5M_AUTHDATA;
     ad->ad_type = TEST_AD_TYPE;
     ad->contents = (uint8_t *)estrdup("db-authdata-test");
     ad->length = strlen((char *)ad->contents);
-    list = ealloc(2 * sizeof(*list));
+    list = ealloc(3 * sizeof(*list));
     list[0] = ad;
-    list[1] = NULL;
+    list[1] = pac_ad_ifr;
+    list[2] = NULL;
     *signed_auth_data = list;
     return 0;
 }
