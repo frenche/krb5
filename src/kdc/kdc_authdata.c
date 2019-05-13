@@ -835,7 +835,7 @@ handle_authdata(krb5_context context, unsigned int flags,
     krb5_error_code ret = 0;
     size_t i;
 
-    if (req->msg_type == KRB5_TGS_REQ &&
+    if (0 && req->msg_type == KRB5_TGS_REQ &&
         req->authorization_data.ciphertext.data != NULL) {
         /* Copy TGS request authdata.  This must be done first so that modules
          * have access to the unencrypted request authdata. */
