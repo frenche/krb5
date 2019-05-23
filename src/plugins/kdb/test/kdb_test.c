@@ -542,17 +542,17 @@ test_encrypt_key_data(krb5_context context, const krb5_keyblock *mkey,
 }
 
 typedef struct {
-    char *pac_princ;
+    krb5_principal pac_princ;
     char *proxy_target;
     krb5_boolean not_delegated;
 } pac_info;
 
 static void
-free_pac_info_data(pac_info *info)
+free_pac_info_data(krb5_context context, pac_info *info)
 {
     if(info != NULL) {
-      free(info->pac_princ);
-      free(info->proxy_target);
+        krb5_free_principal(context, info->pac_princ);
+        free(info->proxy_target);
     }
     return;
 }
@@ -588,50 +588,30 @@ create_pac_db(krb5_context context,
 }
 
 static krb5_error_code
-parse_ticket_pac(krb5_context context,
-                 unsigned int flags,
-                 krb5_const_principal client_princ,
-                 krb5_const_principal server_princ,
-                 krb5_boolean check_realm,
-                 krb5_keyblock *server_key,
-                 krb5_keyblock *krbtgt_key,
-                 krb5_timestamp authtime,
-                 krb5_authdata **tgt_auth_data,
-                 krb5_pac *out_pac)
-{
-    krb5_authdata **authdata;
-    krb5_pac pac;
-
-    check(krb5_find_authdata(context, tgt_auth_data, NULL,
-                             KRB5_AUTHDATA_WIN2K_PAC, &authdata));
-    if (authdata == NULL)
-        return 0;
-    assert(authdata[1] == NULL);
-    check(krb5_pac_parse(context,
-                         authdata[0]->contents,
-                         authdata[0]->length,
-                         &pac));
-    krb5_free_authdata(context, authdata);
-    /* TEMP: don't verify krbtgt signature as it fails s4u2proxy tests when the
-     * evidence ticket was aquired via AS-REQ (kinit -S). We may be passing the
-     * server key as krbtgt in that case, so the krbtgt signature is wrong. */
-    check(krb5_pac_verify_ext(context, pac, authtime, client_princ, server_key,
-                              (flags & KRB5_KDB_FLAG_CROSS_REALM) ? NULL :
-                              NULL, check_realm));
-
-    *out_pac = pac;
-    return 0;
-}
-
-static krb5_error_code
-get_pac_info(krb5_context context, krb5_pac pac, pac_info *info)
+get_pac_info(krb5_context context, krb5_pac pac, krb5_boolean xrealm_s4u,
+             pac_info *info)
 {
     krb5_data data;
     size_t len, i;
     krb5_ui_4 *types = NULL;
+    char *p, *princ_name;
+    int n = 0, flags = 0;
 
     info->proxy_target = NULL;
-    check(krb5_pac_get_client_info(context, pac, NULL, &info->pac_princ));
+    check(krb5_pac_get_client_info(context, pac, NULL, &princ_name));
+    p = princ_name;
+    while(*p++)
+        if (*p == '@')
+            n++;
+    if (xrealm_s4u) {
+        flags &= KRB5_PRINCIPAL_PARSE_REQUIRE_REALM;
+        n--;
+    }
+    if (n == 1)
+        flags |= KRB5_PRINCIPAL_PARSE_ENTERPRISE;
+    else assert (n == 0);
+    check(krb5_parse_name_flags(context, princ_name, flags, &info->pac_princ));
+
     check(krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO, &data));
     assert(data.length == 1);
     info->not_delegated = *data.data;
@@ -648,6 +628,54 @@ get_pac_info(krb5_context context, krb5_pac pac, pac_info *info)
         krb5_free_data_contents(context, &data);
     }
     free(types);
+    return 0;
+}
+
+static krb5_error_code
+parse_ticket_pac(krb5_context context,
+                 unsigned int flags,
+                 krb5_const_principal client_princ,
+                 krb5_const_principal server_princ,
+                 krb5_boolean check_realm,
+                 krb5_keyblock *server_key,
+                 krb5_keyblock *krbtgt_key,
+                 krb5_timestamp authtime,
+                 krb5_authdata **tgt_auth_data,
+                 krb5_pac *out_pac,
+                 pac_info *info)
+{
+    krb5_authdata **authdata;
+    krb5_pac pac;
+    krb5_boolean xrealm_s4u;
+    krb5_const_principal princ = client_princ;
+
+    check(krb5_find_authdata(context, tgt_auth_data, NULL,
+                             KRB5_AUTHDATA_WIN2K_PAC, &authdata));
+    if (authdata == NULL)
+        return 0;
+    assert(authdata[1] == NULL);
+    check(krb5_pac_parse(context,
+                         authdata[0]->contents,
+                         authdata[0]->length,
+                         &pac));
+    krb5_free_authdata(context, authdata);
+    xrealm_s4u = ((flags & KRB5_KDB_FLAGS_S4U) &&
+                  (flags & KRB5_KDB_FLAG_CROSS_REALM));
+    check(get_pac_info(context, pac, xrealm_s4u, info));
+    if (info->proxy_target != NULL &&
+        !(flags & KRB5_KDB_FLAG_CONSTRAINED_DELEGATION)) {
+        assert(flags & KRB5_KDB_FLAG_CROSS_REALM);
+        assert(flags & KRB5_KDB_FLAG_ISSUING_REFERRAL);
+        princ = NULL; // we can't verify pac principal
+    }
+    /* TEMP: don't verify krbtgt signature as it fails s4u2proxy tests when the
+     * evidence ticket was aquired via AS-REQ (kinit -S). We may be passing the
+     * server key as krbtgt in that case, so the krbtgt signature is wrong. */
+    check(krb5_pac_verify_ext(context, pac, authtime, princ, server_key,
+                              (flags & KRB5_KDB_FLAG_CROSS_REALM) ? NULL :
+                              NULL, check_realm));
+
+    *out_pac = pac;
     return 0;
 }
 
@@ -744,24 +772,21 @@ test_sign_authdata(krb5_context context, unsigned int flags,
                                check_realm,
                                (flags & KRB5_KDB_FLAG_CONSTRAINED_DELEGATION)
                                ? client_key : krbtgt_key, krbtgt_key,
-                               authtime, tgt_auth_data, &in_pac));
+                               authtime, tgt_auth_data, &in_pac, &info));
         if (in_pac == NULL) {
             assert((flags & KRB5_KDB_FLAGS_S4U) == 0);
             goto add_kdb_test_ad;
         }
-        check(get_pac_info(context, in_pac, &info));
         krb5_pac_free(context, in_pac);
 
-        /* Create a new pac as we might have changed pac principal (with or
-         * without realm). */
+        /* Create a new pac as we may changepac principal's realm */
         check(create_pac(context, info.not_delegated, &pac));
-        if (flags & KRB5_KDB_FLAG_CONSTRAINED_DELEGATION) {
+        if (info.proxy_target != NULL) {
             assert(info.not_delegated == 0);
             check(handle_delegation_info(context,
                                          (flags & KRB5_KDB_FLAG_CROSS_REALM),
                                          pac, &info, server_princ));
         }
-        free_pac_info_data(&info);
     }
 
     sign_realm = ((flags & KRB5_KDB_FLAGS_S4U) &&
@@ -770,6 +795,7 @@ test_sign_authdata(krb5_context context, unsigned int flags,
                             server_key, krbtgt_key, sign_realm,
                             &pac_data));
     krb5_pac_free(context, pac);
+    free_pac_info_data(context, &info);
     check(encode_pac_ad(context, &pac_data, &pac_ad_ifr));
 
 add_kdb_test_ad:
@@ -868,9 +894,6 @@ test_get_authdata_info(krb5_context context,
     krb5_authdata **authdata = NULL;
     krb5_pac pac = NULL;
     pac_info info;
-    char *p;
-    int n = 0, flags = 0;
-
     check(krb5_find_authdata(context,
                              in_authdata,
                              NULL,
@@ -883,22 +906,12 @@ test_get_authdata_info(krb5_context context,
                          authdata[0]->length,
                          &pac));
     krb5_free_authdata(context, authdata);
-    check(get_pac_info(context, pac, &info));
+    check(get_pac_info(context, pac, xrealm_s4u, &info));
     krb5_pac_free(context, pac);
-    p = info.pac_princ;
-    while(*p++)
-        if (*p == '@')
-            n++;
-    if (xrealm_s4u) {
-        flags &= KRB5_PRINCIPAL_PARSE_REQUIRE_REALM;
-        n--;
-    }
-    if (n == 1)
-        flags |= KRB5_PRINCIPAL_PARSE_ENTERPRISE;
-    else assert (n == 0);
-    check(krb5_parse_name_flags(context, info.pac_princ, flags, client_out));
+    *client_out = info.pac_princ;
+    info.pac_princ = NULL;
     *not_delegated = info.not_delegated;
-    free_pac_info_data(&info);
+    free_pac_info_data(context, &info);
     return 0;
 }
 
