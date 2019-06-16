@@ -488,3 +488,4 @@ EXPORTS
 
 ; new in 1.18
 	krb5int_c_deprecated_enctype			@450 ; PRIVATE
+	k5_get_proxy_cred_from_kdc			@451 ; PRIVATE GSSAPI

@@ -2329,6 +2329,11 @@ krb5_get_credentials_for_proxy(krb5_context context,
                                krb5_ticket *evidence_tkt,
                                krb5_creds **out_creds);
 
+krb5_error_code
+k5_get_proxy_cred_from_kdc(krb5_context context, krb5_flags options,
+                           krb5_ccache ccache, krb5_creds *in_creds,
+                           krb5_creds **out_creds);
+
 krb5_error_code KRB5_CALLCONV
 krb5int_get_authdata_containee_types(krb5_context context,
                                      const krb5_authdata *container,
