@@ -140,6 +140,7 @@ k5_free_secure_cookie
 k5_free_pa_spake
 k5_free_serverlist
 k5_free_spake_factor
+k5_get_proxy_cred_from_kdc
 k5_hostrealm_free_context
 k5_init_trace
 k5_is_string_numeric
