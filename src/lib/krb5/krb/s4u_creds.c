@@ -725,6 +725,73 @@ cleanup:
     return code;
 }
 
+static krb5_error_code
+get_client_tgt(krb5_context context,
+               krb5_flags options,
+               krb5_ccache ccache,
+               krb5_principal client,
+               krb5_creds **tgt)
+{
+    krb5_error_code code;
+    krb5_principal tgs;
+    krb5_creds mcreds;
+
+    memset(&mcreds, 0, sizeof(mcreds));
+
+    code = krb5int_tgtname(context, &client->realm, &client->realm, &tgs);
+    if (code)
+        return code;
+
+    mcreds.client = client;
+    mcreds.server = tgs;
+
+    code = krb5_get_credentials(context, options, ccache, &mcreds, tgt);
+    krb5_free_principal(context, tgs);
+
+    return code;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_get_proxy_cred_from_kdc(krb5_context context,
+                             krb5_flags options,
+                             krb5_ccache ccache,
+                             krb5_creds *in_creds,
+                             krb5_creds **out_creds)
+{
+    krb5_error_code code;
+    krb5_flags kdcopt;
+    krb5_creds *tgt = NULL, *tkt = NULL;;
+
+    *out_creds = NULL;
+
+    if (in_creds->second_ticket.length == 0)
+        return EINVAL;
+
+    code = get_client_tgt(context, options, ccache, in_creds->client, &tgt);
+    if (code)
+        goto cleanup;
+
+    kdcopt = KDC_OPT_FORWARDABLE |
+             KDC_OPT_CANONICALIZE |
+             KDC_OPT_CNAME_IN_ADDL_TKT;
+    if (options & KRB5_GC_NO_TRANSIT_CHECK)
+        kdcopt |= KDC_OPT_DISABLE_TRANSITED_CHECK;
+
+    code = krb5_get_cred_via_tkt_ext(context, tgt,
+                                     FLAGS2OPTS(tgt->ticket_flags) | kdcopt,
+                                     tgt->addresses, NULL, in_creds, NULL,
+                                     NULL, NULL, NULL, &tkt, NULL);
+    if (code)
+        goto cleanup;
+
+    *out_creds = tkt;
+
+cleanup:
+    krb5_free_creds(context, tgt);
+
+    return code;
+}
+
 /*
  * Exported API for constrained delegation (S4U2Proxy).
  *
@@ -797,11 +864,8 @@ krb5_get_credentials_for_proxy(krb5_context context,
     s4u_creds.client = evidence_tkt->server;
     s4u_creds.second_ticket = *evidence_tkt_data;
 
-    code = krb5_get_credentials(context,
-                                options | KRB5_GC_CONSTRAINED_DELEGATION,
-                                ccache,
-                                &s4u_creds,
-                                out_creds);
+    code = krb5_get_proxy_cred_from_kdc(context, options, ccache, &s4u_creds,
+                                        out_creds);
     if (code != 0)
         goto cleanup;
 
