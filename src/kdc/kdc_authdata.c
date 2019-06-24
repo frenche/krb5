@@ -316,9 +316,10 @@ copy_tgt_authdata(krb5_context context, krb5_kdc_req *request,
 static krb5_error_code
 fetch_kdb_authdata(krb5_context context, unsigned int flags,
                    krb5_db_entry *client, krb5_db_entry *server,
-                   krb5_db_entry *header_server, krb5_keyblock *client_key,
-                   krb5_keyblock *server_key, krb5_keyblock *header_key,
-                   krb5_kdc_req *req, krb5_const_principal altprinc,
+                   krb5_db_entry *header_server, krb5_db_entry *local_tgt,
+                   krb5_keyblock *client_key, krb5_keyblock *server_key,
+                   krb5_keyblock *header_key, krb5_kdc_req *req,
+                   krb5_const_principal altprinc,
                    krb5_enc_tkt_part *enc_tkt_req,
                    krb5_enc_tkt_part *enc_tkt_reply)
 {
@@ -327,7 +328,10 @@ fetch_kdb_authdata(krb5_context context, unsigned int flags,
     krb5_boolean tgs_req = (req->msg_type == KRB5_TGS_REQ);
     krb5_const_principal actual_client;
     krb5_db_entry *krbtgt;
-    krb5_keyblock *krbtgt_key;
+    krb5_keyblock krbtgt_key_storage, *krbtgt_key;
+    krb5_key_data *krbtgt_kd;
+
+    memset(&krbtgt_key_storage, 0, sizeof(krbtgt_key_storage));
 
     /*
      * Check whether KDC issued authorization data should be included.
@@ -350,9 +354,30 @@ fetch_kdb_authdata(krb5_context context, unsigned int flags,
             return 0;
 
         assert(enc_tkt_reply->times.authtime == enc_tkt_req->times.authtime);
+
+        krbtgt = header_server;
+        krbtgt_key = header_key;
     } else {
         if (!isflagset(flags, KRB5_KDB_FLAG_INCLUDE_PAC))
             return 0;
+
+        if (!krb5_is_tgs_principal(server->princ)) {
+            /* Get the first local tgt key of the highest kvno. */
+            ret = krb5_dbe_find_enctype(context, local_tgt, -1, -1, 0,
+                                        &krbtgt_kd);
+            if (ret)
+                return ret;
+
+            ret = krb5_dbe_decrypt_key_data(context, NULL, krbtgt_kd,
+                                            &krbtgt_key_storage, NULL);
+            if (ret)
+                return ret;
+            krbtgt = local_tgt;
+            krbtgt_key = &krbtgt_key_storage;
+        } else {
+            krbtgt = server;
+            krbtgt_key = server_key;
+        }
     }
 
     /*
@@ -365,21 +390,13 @@ fetch_kdb_authdata(krb5_context context, unsigned int flags,
     else
         actual_client = enc_tkt_reply->client;
 
-    /*
-     * For DAL major version 5, always pass "krbtgt" and "krbtgt_key"
-     * parameters which are usually, but not always, for local or cross-realm
-     * TGT principals.  In the future we might rename the parameters and pass
-     * NULL for AS requests.
-     */
-    krbtgt = (header_server != NULL) ? header_server : server;
-    krbtgt_key = (header_key != NULL) ? header_key : server_key;
-
     tgt_authdata = tgs_req ? enc_tkt_req->authorization_data : NULL;
     ret = krb5_db_sign_authdata(context, flags, actual_client, req->server, client,
                                 server, krbtgt, client_key, server_key,
                                 krbtgt_key, enc_tkt_reply->session,
                                 enc_tkt_reply->times.authtime, tgt_authdata,
                                 &db_authdata);
+    krb5_free_keyblock_contents(context, &krbtgt_key_storage);
     if (ret)
         return (ret == KRB5_PLUGIN_OP_NOTSUPP) ? 0 : ret;
 
@@ -878,8 +895,8 @@ handle_authdata(krb5_context context, unsigned int flags,
     if (!isflagset(enc_tkt_reply->flags, TKT_FLG_ANONYMOUS)) {
         /* Fetch authdata from the KDB if appropriate. */
         ret = fetch_kdb_authdata(context, flags, client, server, header_server,
-                                 client_key, server_key, header_key, req,
-                                 altprinc, enc_tkt_req, enc_tkt_reply);
+                                 local_tgt, client_key, server_key, header_key,
+                                 req, altprinc, enc_tkt_req, enc_tkt_reply);
         if (ret)
             return ret;
 
