@@ -191,9 +191,9 @@ static krb5_error_code get_credentials(context, cred, server, now,
 
         in_creds.client = cred->impersonator;
         in_creds.second_ticket = evidence_creds.ticket;
-        code = k5_get_proxy_cred_from_kdc(context, KRB5_GC_CANONICALIZE,
-                                          cred->ccache, &in_creds,
-                                          &result_creds);
+        flags = KRB5_GC_CANONICALIZE | KRB5_GC_CONSTRAINED_DELEGATION;
+        code = krb5_get_credentials(context, flags, cred->ccache,
+                                    &in_creds, &result_creds);
     }
 
     if (code)

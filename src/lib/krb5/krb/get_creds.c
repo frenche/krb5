@@ -1284,6 +1284,14 @@ krb5_get_credentials(krb5_context context, krb5_flags options,
 
     *out_creds = NULL;
 
+    /* If S4U2Proxy is requested with referrals realm, call an external
+     * API which supports resource-based constrained delegation. */
+    if ((options & KRB5_GC_CONSTRAINED_DELEGATION) &&
+        (krb5_is_referral_realm(&in_creds->server->realm) ||
+         krb5_realm_compare(context, in_creds->client, in_creds->server)))
+        return k5_get_proxy_cred_from_kdc(context, options, ccache, in_creds,
+                                          out_creds);
+
     /* Allocate a container. */
     ncreds = k5alloc(sizeof(*ncreds), &code);
     if (ncreds == NULL)

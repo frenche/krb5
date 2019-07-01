@@ -343,16 +343,21 @@ ra.kinit('impersonator@A', None, ['-k', '-t', ra.keytab])
 # Local realm
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'p:rb@A'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@A@'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@A@A'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.a'])
 ra.run(['./t_s4u', 'p:' + 'sensitive@A', 'h:service@rb.a'], expected_code=1)
 
 # Cross realm
+#ra.run(['./t_s4u', 'p:' + ra.user_princ, 'p:rb@B'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@B@'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@B@A'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.b'])
 ra.run(['./t_s4u', 'p:' + 'sensitive@A', 'h:service@rb.b'], expected_code=1)
 
 # Transitive trust
+#ra.run(['./t_s4u', 'p:' + ra.user_princ, 'p:rb@C'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@C@'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@C@A'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.c'])
 ra.run(['./t_s4u', 'p:' + 'sensitive@A', 'h:service@rb.c'], expected_code=1)
 
