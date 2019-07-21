@@ -340,20 +340,39 @@ rc.start_kdc()
 ra.extract_keytab('impersonator@A', ra.keytab)
 ra.kinit('impersonator@A', None, ['-k', '-t', ra.keytab])
 
+domain_realm = {'domain_realm': {'.a':'A', '.b':'B', '.c':'C'}}
+domain_conf = ra.special_env('domain_conf', False, krb5_conf=domain_realm)
+
 # Local realm
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'p:rb'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'p:rb@A'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@A'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@A@'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@A@A'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@A@na'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.a'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.a'], env=domain_conf)
 ra.run(['./t_s4u', 'p:' + 'sensitive@A', 'h:service@rb.a'], expected_code=1)
 
 # Cross realm
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'p:rb@B'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@B'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@B@'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@B@B'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@B@na'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.b'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.b'], env=domain_conf)
 ra.run(['./t_s4u', 'p:' + 'sensitive@A', 'h:service@rb.b'], expected_code=1)
 
 # Transitive trust
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'p:rb@C'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@C'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@C@'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@C@C'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'e:rb@C@na'])
 ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.c'])
+ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.c'], env=domain_conf)
 ra.run(['./t_s4u', 'p:' + 'sensitive@A', 'h:service@rb.c'], expected_code=1)
 
 ra.stop()
