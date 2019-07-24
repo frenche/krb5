@@ -1034,6 +1034,13 @@ k5_get_proxy_cred_from_kdc(krb5_context context, krb5_flags options,
     code = krb5_get_cred_via_tkt_ext(context, tgt, flags, tgt->addresses,
                                      in_padata, &mcreds, NULL, NULL, NULL,
                                      &enc_padata, &tkt, NULL);
+
+    if (code == KRB_AP_ERR_BAD_INTEGRITY &&
+        !krb5_is_referral_realm(&in_creds->server->realm) &&
+        !krb5_realm_compare(context, in_creds->server, server))
+        k5_setmsg(context, code, "Realm specified but S4U2Proxy must use"
+                                 "referral realm");
+
     if (code)
         goto cleanup;
 
