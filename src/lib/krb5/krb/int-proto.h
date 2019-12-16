@@ -391,4 +391,65 @@ k5_get_proxy_cred_from_kdc(krb5_context context, krb5_flags options,
                            krb5_ccache ccache, krb5_creds *in_creds,
                            krb5_creds **out_creds);
 
+/* Convert ticket flags to necessary KDC options */
+#define FLAGS2OPTS(flags) (flags & KDC_TKT_COMMON_MASK)
+
+/* Glue API for krb5_tkt_creds_ */
+typedef struct _k5_tkt_creds_in_data {
+    krb5_flags req_options;     /* Caller-requested KRB5_GC_* options */
+    krb5_flags req_kdcopt;      /* Caller-requested options as KDC options */
+    krb5_creds *in_creds;       /* Creds requested by caller */
+    krb5_ccache ccache;         /* Caller-provided ccache (alias) */
+    krb5_principal req_server;  /* Caller-requested server principal */
+    krb5_authdata **authdata;   /* Caller-requested authdata */
+} *k5_tkt_creds_in_data;
+
+void k5_tkt_creds_in_data_free(krb5_context context,
+                               k5_tkt_creds_in_data in_data);
+
+typedef struct _krb5_gc_creds_context *krb5_gc_creds_context;
+
+krb5_error_code k5_gc_tgs_init(krb5_context context,
+                               k5_tkt_creds_in_data in_data,
+                               krb5_gc_creds_context *out_ctx);
+
+krb5_error_code k5_gc_tgs_step(krb5_context context,
+                               krb5_gc_creds_context ctx,
+                               krb5_data *in, krb5_data *out,
+                               krb5_data *realm,
+                               krb5_boolean *need_continue,
+                               krb5_creds **reply_creds);
+
+void k5_gc_tgs_free(krb5_context context, krb5_gc_creds_context ctx);
+
+typedef struct _krb5_s4u2s_creds_context *krb5_s4u2s_creds_context;
+
+krb5_error_code k5_gc_s4u2s_init(krb5_context context,
+                                 k5_tkt_creds_in_data in_data,
+                                 krb5_s4u2s_creds_context *out_ctx);
+
+krb5_error_code k5_gc_s4u2s_step(krb5_context context,
+                                 krb5_s4u2s_creds_context ctx,
+                                 krb5_data *in, krb5_data *out,
+                                 krb5_data *realm,
+                                 krb5_boolean *need_continue,
+                                 krb5_creds **reply_creds);
+
+void k5_gc_s4u2s_free(krb5_context context, krb5_s4u2s_creds_context ctx);
+
+typedef struct _krb5_s4u2p_creds_context *krb5_s4u2p_creds_context;
+
+krb5_error_code k5_gc_s4u2p_init(krb5_context context,
+                                 k5_tkt_creds_in_data in_data,
+                                 krb5_s4u2p_creds_context *out_ctx);
+
+krb5_error_code k5_gc_s4u2p_step(krb5_context context,
+                                 krb5_s4u2p_creds_context ctx,
+                                 krb5_data *in, krb5_data *out,
+                                 krb5_data *realm,
+                                 krb5_boolean *need_continue,
+                                 krb5_creds **reply_creds);
+
+void k5_gc_s4u2p_free(krb5_context context, krb5_s4u2p_creds_context ctx);
+
 #endif /* KRB5_INT_FUNC_PROTO__ */
