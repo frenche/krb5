@@ -765,14 +765,14 @@ get_cached_tgt(krb5_context context, krb5_tkt_creds_context ctx,
 
 /* Point *tgt_out at an allocated credentials structure containing the local
  * TGT retrieved from ctx->ccache. */
-static krb5_error_code
-get_cached_local_tgt(krb5_context context, krb5_tkt_creds_context ctx,
-                     krb5_creds **tgt_out)
+krb5_error_code
+k5_get_cached_local_tgt(krb5_context context, krb5_principal client,
+                        krb5_flags flags, krb5_ccache ccache,
+                        krb5_creds **tgt_out)
 {
     krb5_creds mcreds;
     krb5_error_code code;
     krb5_principal tgtname = NULL;
-    krb5_flags flags = KRB5_TC_SUPPORTED_KTYPES;
     krb5_timestamp now;
     krb5_creds *tgt;
 
@@ -783,20 +783,17 @@ get_cached_local_tgt(krb5_context context, krb5_tkt_creds_context ctx,
         return code;
 
     /* Construct the principal name. */
-    code = krb5int_tgtname(context, &ctx->client->realm, &ctx->client->realm,
-                           &tgtname);
+    code = krb5int_tgtname(context, &client->realm, &client->realm, &tgtname);
     if (code != 0)
         return code;
 
     /* Construct a matching cred for the ccache query. */
     memset(&mcreds, 0, sizeof(mcreds));
-    mcreds.client = ctx->client;
+    mcreds.client = client;
     mcreds.server = tgtname;
 
     /* Fetch the TGT credential. */
-    context->use_conf_ktypes = TRUE;
-    code = cache_get(context, ctx->ccache, flags, &mcreds, &tgt);
-    context->use_conf_ktypes = FALSE;
+    code = cache_get(context, ccache, flags, &mcreds, &tgt);
     krb5_free_principal(context, tgtname);
     if (code)
         return code;
@@ -809,6 +806,22 @@ get_cached_local_tgt(krb5_context context, krb5_tkt_creds_context ctx,
 
     *tgt_out = tgt;
     return 0;
+}
+
+static krb5_error_code
+get_cached_local_tgt(krb5_context context, krb5_gc_creds_context ctx,
+                     krb5_creds **tgt_out)
+{
+    krb5_error_code code;
+    krb5_flags flags = KRB5_TC_SUPPORTED_KTYPES;
+
+    /* Fetch the TGT credential. */
+    context->use_conf_ktypes = TRUE;
+    code = k5_get_cached_local_tgt(context, ctx->in_creds->client, flags,
+                                   ctx->ccache, tgt_out);
+    context->use_conf_ktypes = FALSE;
+
+    return code;
 }
 
 /* Initialize the realm path fields for getting a TGT for

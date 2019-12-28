@@ -83,6 +83,11 @@ krb5int_construct_matching_creds(krb5_context context, krb5_flags options,
                                  krb5_creds *in_creds, krb5_creds *mcreds,
                                  krb5_flags *fields);
 
+krb5_error_code
+k5_get_cached_local_tgt(krb5_context context, krb5_principal client,
+                        krb5_flags flags, krb5_ccache ccache,
+                        krb5_creds **tgt_out);
+
 #define IS_TGS_PRINC(p) ((p)->length == 2 &&                            \
                          data_eq_string((p)->data[0], KRB5_TGS_NAME))
 
