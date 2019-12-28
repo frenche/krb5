@@ -769,29 +769,6 @@ add_rbcd_padata(krb5_context context, krb5_pa_data ***in_padata)
     return code;
 }
 
-/* Set *tgt_out to a local TGT for the client realm retrieved from ccache. */
-static krb5_error_code
-get_client_tgt(krb5_context context, krb5_flags options, krb5_ccache ccache,
-               krb5_principal client, krb5_creds **tgt_out)
-{
-    krb5_error_code code;
-    krb5_principal tgs;
-    krb5_creds mcreds;
-
-    *tgt_out = NULL;
-
-    code = krb5int_tgtname(context, &client->realm, &client->realm, &tgs);
-    if (code)
-        return code;
-
-    memset(&mcreds, 0, sizeof(mcreds));
-    mcreds.client = client;
-    mcreds.server = tgs;
-    code = krb5_get_credentials(context, options, ccache, &mcreds, tgt_out);
-    krb5_free_principal(context, tgs);
-    return code;
-}
-
 /*
  * Copy req_server to *out_server.  If req_server has the referral realm, set
  * the realm of *out_server to realm.  Otherwise the S4U2Proxy request will
@@ -989,7 +966,7 @@ k5_get_proxy_cred_from_kdc(krb5_context context, krb5_flags options,
 
     options &= ~KRB5_GC_CONSTRAINED_DELEGATION;
 
-    code = get_client_tgt(context, options, ccache, in_creds->client, &tgt);
+    code = k5_get_cached_local_tgt(context, in_creds->client, 0, ccache, &tgt);
     if (code)
         goto cleanup;
 
