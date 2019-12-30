@@ -6832,7 +6832,6 @@ typedef struct _krb5_get_init_creds_opt {
 #define KRB5_GET_INIT_CREDS_OPT_CANONICALIZE    0x0200
 #define KRB5_GET_INIT_CREDS_OPT_ANONYMOUS       0x0400
 #define KRB5_GET_INIT_CREDS_OPT_IDENTIFY_REALM  0x0800
-#define KRB5_GET_INIT_CREDS_OPT_ID_CERT         0x1000
 
 
 /**
@@ -6987,15 +6986,17 @@ krb5_get_init_creds_opt_set_salt(krb5_get_init_creds_opt *opt,
                                  krb5_data *salt);
 
 /**
- * Set flag to stop when client realm is identified.
+ * Set or unset flag to stop when client realm is identified.
  *
  * @param [in] opt              Options structure
+ * @param [in] set              Weather to set or unset
  */
 void KRB5_CALLCONV
-krb5_get_init_creds_opt_set_identify_realm(krb5_get_init_creds_opt *opt);
+krb5_get_init_creds_opt_set_identify_realm(krb5_get_init_creds_opt *opt,
+                                           int set);
 
 /**
- * Set client certificate to identify its realm (implies identify_realm).
+ * Set or unset client certificate to identify its realm (implies identify_realm).
  *
  * @param [in] opt              Options structure
  * @param [in] cert             Certificate data
@@ -7520,9 +7521,9 @@ krb5_init_creds_get_times(krb5_context context, krb5_init_creds_context ctx,
                           krb5_ticket_times *times);
 
 krb5_error_code KRB5_CALLCONV
-krb5_init_creds_get_req_client(krb5_context context,
-                               krb5_init_creds_context ctx,
-                               krb5_principal *client);
+krb5_init_creds_get_req_client_realm(krb5_context context,
+                                     krb5_init_creds_context ctx,
+                                     krb5_principal *realm);
 
 struct _krb5_tkt_creds_context;
 typedef struct _krb5_tkt_creds_context *krb5_tkt_creds_context;

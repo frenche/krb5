@@ -391,6 +391,8 @@ typedef struct _k5_tkt_creds_in_data {
     krb5_ccache ccache;         /* Caller-provided ccache (alias) */
     krb5_principal req_server;  /* Caller-requested server principal */
     krb5_authdata **authdata;   /* Caller-requested authdata */
+    krb5_principal impersonate;
+    krb5_data impersonate_cert;
 } *k5_tkt_creds_in_data;
 
 void k5_tkt_creds_in_data_free(krb5_context context,

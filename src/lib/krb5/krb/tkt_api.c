@@ -61,15 +61,14 @@ struct _krb5_tkt_creds_context {
         krb5_s4u2p_creds_context s4u2p_ctx;
     };
     enum gc_type gc_type;
-
-    krb5_principal impersonate_client;
-    krb5_data *impersonate_cert;
 };
 
 static krb5_error_code
 tkt_creds_set_gc_type(krb5_context context, krb5_tkt_creds_context ctx)
 {
-    if (ctx->impersonate_client != NULL || ctx->impersonate_cert != NULL) {
+    if (ctx->in_data->impersonate_cert.length != 0 && ctx->in_data->impersonate == NULL)
+        return EINVAL;
+    if (ctx->in_data->impersonate != NULL) {
         if (ctx->in_data->req_options & KRB5_GC_CONSTRAINED_DELEGATION)
             return EINVAL;
         ctx->gc_type = GC_S4U2S;
@@ -161,8 +160,8 @@ krb5_tkt_creds_step(krb5_context context, krb5_tkt_creds_context ctx,
 
         if (ctx->gc_type == GC_TGS)
             code = k5_gc_tgs_init(context, ctx->in_data, &ctx->gc_ctx);
-        //else if (ctx->gc_type == GC_S4U2S)
-        //    code = k5_gc_s4u2s_init(context, ctx->in_data, &ctx->s4u2s_ctx);
+        else if (ctx->gc_type == GC_S4U2S)
+            code = k5_gc_s4u2s_init(context, ctx->in_data, &ctx->s4u2s_ctx);
         else if (ctx->gc_type == GC_S4U2P)
             code = k5_gc_s4u2p_init(context, ctx->in_data, &ctx->s4u2p_ctx);
         else
@@ -180,9 +179,9 @@ krb5_tkt_creds_step(krb5_context context, krb5_tkt_creds_context ctx,
     if (ctx->gc_type == GC_TGS)
         code = k5_gc_tgs_step(context, ctx->gc_ctx, in, out, realm,
                               &continuation_needed, &ctx->reply_creds);
-    //else if (ctx->gc_type == GC_S4U2S)
-    //    code = k5_gc_s4u2s_step(context, ctx->s4u2s_ctx, in, out, realm,
-    //                            &continuation_needed, &ctx->reply_creds);
+    else if (ctx->gc_type == GC_S4U2S)
+        code = k5_gc_s4u2s_step(context, ctx->s4u2s_ctx, in, out, realm,
+                                &continuation_needed, &ctx->reply_creds);
     else if (ctx->gc_type == GC_S4U2P)
         code = k5_gc_s4u2p_step(context, ctx->s4u2p_ctx, in, out, realm,
                                 &continuation_needed, &ctx->reply_creds);
@@ -228,6 +227,8 @@ void k5_tkt_creds_in_data_free(krb5_context context,
     krb5_free_principal(context, in_data->req_server);
     krb5_cc_close(context, in_data->ccache);
     krb5_free_authdata(context, in_data->authdata);
+    krb5_free_principal(context, in_data->impersonate);
+    krb5_free_data_contents(context, &in_data->impersonate_cert);
     free(in_data);
 }
 
@@ -239,13 +240,11 @@ krb5_tkt_creds_free(krb5_context context, krb5_tkt_creds_context ctx)
     if (ctx->gc_type == GC_TGS)
         k5_gc_tgs_free(context, ctx->gc_ctx);
     else if (ctx->gc_type == GC_S4U2S)
-        ; // k5_gc_s4u2s_free(context, ctx->s4u2s_ctx);
+        k5_gc_s4u2s_free(context, ctx->s4u2s_ctx);
     else if (ctx->gc_type == GC_S4U2P)
         k5_gc_s4u2p_free(context, ctx->s4u2p_ctx);
     k5_tkt_creds_in_data_free(context, ctx->in_data);
     krb5_free_creds(context, ctx->reply_creds);
-    krb5_free_principal(context, ctx->impersonate_client);
-    krb5_free_data(context, ctx->impersonate_cert);
     free(ctx);
 }
 
@@ -254,8 +253,10 @@ krb5_tkt_creds_set_impersonate(krb5_context context,
                                krb5_tkt_creds_context ctx,
                                krb5_principal impersonate)
 {
-    krb5_free_principal(context, ctx->impersonate_client);
-    return krb5_copy_principal(context, impersonate, &ctx->impersonate_client);
+    krb5_free_principal(context, ctx->in_data->impersonate);
+    ctx->in_data->impersonate = NULL;
+    return krb5_copy_principal(context, impersonate,
+                               &ctx->in_data->impersonate);
 }
 
 krb5_error_code KRB5_CALLCONV
@@ -263,8 +264,11 @@ krb5_tkt_creds_set_impersonate_cert(krb5_context context,
                                     krb5_tkt_creds_context ctx,
                                     krb5_data *cert)
 {
-    krb5_free_data(context, ctx->impersonate_cert);
-    return krb5_copy_data(context, cert, &ctx->impersonate_cert);
+    krb5_free_data_contents(context, &ctx->in_data->impersonate_cert);
+    if (cert == NULL)
+        return 0;
+    return krb5int_copy_data_contents(context, cert,
+                                      &ctx->in_data->impersonate_cert);
 }
 
 krb5_error_code KRB5_CALLCONV

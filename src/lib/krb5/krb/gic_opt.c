@@ -125,16 +125,19 @@ krb5_get_init_creds_opt_set_salt(krb5_get_init_creds_opt *opt, krb5_data *salt)
 }
 
 void KRB5_CALLCONV
-krb5_get_init_creds_opt_set_identify_realm(krb5_get_init_creds_opt *opt)
+krb5_get_init_creds_opt_set_identify_realm(krb5_get_init_creds_opt *opt,
+                                           int set)
 {
-    opt->flags |= KRB5_GET_INIT_CREDS_OPT_IDENTIFY_REALM;
+    if (set)
+        opt->flags |= KRB5_GET_INIT_CREDS_OPT_IDENTIFY_REALM;
+    else
+        opt->flags &= ~KRB5_GET_INIT_CREDS_OPT_IDENTIFY_REALM;
 }
 
 void KRB5_CALLCONV
 krb5_get_init_creds_opt_set_id_cert(krb5_get_init_creds_opt *opt,
                                     const krb5_data *cert)
 {
-    opt->flags |= KRB5_GET_INIT_CREDS_OPT_ID_CERT;
     opt->id_cert = cert;
 }
 
