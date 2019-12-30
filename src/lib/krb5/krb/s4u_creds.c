@@ -33,6 +33,54 @@
  * itself on behalf of an arbitrary principal.
  */
 
+
+/*
+ * Make AS requests with the canonicalize flag set, stopping when we get a
+ * message indicating which realm the client principal is in.  Set *client_out
+ * to a copy of client with the canonical realm.  If subject_cert is non-null,
+ * include PA_S4U_X509_USER pa-data with the subject certificate each request.
+ * (See [MS-SFU] 3.1.5.1.1.1 and 3.1.5.1.1.2.)
+ */
+
+static krb5_error_code
+k5_identify_realm(krb5_context context, krb5_principal client,
+                  const krb5_data *subject_cert, krb5_principal *client_out)
+{
+    krb5_error_code ret;
+    krb5_get_init_creds_opt *opts = NULL;
+    krb5_init_creds_context ctx = NULL;
+    int use_master = 0;
+
+    *client_out = NULL;
+
+    ret = krb5_get_init_creds_opt_alloc(context, &opts);
+    if (ret)
+        goto cleanup;
+    krb5_get_init_creds_opt_set_tkt_life(opts, 15);
+    krb5_get_init_creds_opt_set_renew_life(opts, 0);
+    krb5_get_init_creds_opt_set_forwardable(opts, 0);
+    krb5_get_init_creds_opt_set_proxiable(opts, 0);
+    krb5_get_init_creds_opt_set_canonicalize(opts, 1);
+    krb5_get_init_creds_opt_set_identify_realm(opts);
+
+    if (subject_cert != NULL)
+        krb5_get_init_creds_opt_set_id_cert(opts, subject_cert);
+
+    ret = krb5_init_creds_init(context, client, NULL, NULL, 0, opts, &ctx);
+    if (ret)
+        goto cleanup;
+
+    ret = k5_init_creds_get(context, ctx, &use_master);
+    if (ret)
+        goto cleanup;
+
+    ret = krb5_init_creds_get_req_client(context, ctx, client_out);
+
+cleanup:
+    krb5_get_init_creds_opt_free(context, opts);
+    krb5_init_creds_free(context, ctx);
+}
+
 static krb5_error_code
 s4u_identify_user(krb5_context context,
                   krb5_creds *in_creds,

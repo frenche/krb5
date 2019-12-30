@@ -6817,6 +6817,7 @@ typedef struct _krb5_get_init_creds_opt {
     krb5_preauthtype *preauth_list;
     int preauth_list_length;
     krb5_data *salt;
+    const krb5_data *id_cert;
 } krb5_get_init_creds_opt;
 
 #define KRB5_GET_INIT_CREDS_OPT_TKT_LIFE        0x0001
@@ -6830,6 +6831,8 @@ typedef struct _krb5_get_init_creds_opt {
 #define KRB5_GET_INIT_CREDS_OPT_CHG_PWD_PRMPT   0x0100
 #define KRB5_GET_INIT_CREDS_OPT_CANONICALIZE    0x0200
 #define KRB5_GET_INIT_CREDS_OPT_ANONYMOUS       0x0400
+#define KRB5_GET_INIT_CREDS_OPT_IDENTIFY_REALM  0x0800
+#define KRB5_GET_INIT_CREDS_OPT_ID_CERT         0x1000
 
 
 /**
@@ -6982,6 +6985,24 @@ krb5_get_init_creds_opt_set_preauth_list(krb5_get_init_creds_opt *opt,
 void KRB5_CALLCONV
 krb5_get_init_creds_opt_set_salt(krb5_get_init_creds_opt *opt,
                                  krb5_data *salt);
+
+/**
+ * Set flag to stop when client realm is identified.
+ *
+ * @param [in] opt              Options structure
+ */
+void KRB5_CALLCONV
+krb5_get_init_creds_opt_set_identify_realm(krb5_get_init_creds_opt *opt);
+
+/**
+ * Set client certificate to identify its realm (implies identify_realm).
+ *
+ * @param [in] opt              Options structure
+ * @param [in] cert             Certificate data
+ */
+void KRB5_CALLCONV
+krb5_get_init_creds_opt_set_id_cert(krb5_get_init_creds_opt *opt,
+                                    const krb5_data *cert);
 
 /**
  * Set or unset change-password-prompt flag in initial credential options.
@@ -7497,6 +7518,11 @@ krb5_init_creds_set_service(krb5_context context, krb5_init_creds_context ctx,
 krb5_error_code KRB5_CALLCONV
 krb5_init_creds_get_times(krb5_context context, krb5_init_creds_context ctx,
                           krb5_ticket_times *times);
+
+krb5_error_code KRB5_CALLCONV
+krb5_init_creds_get_req_client(krb5_context context,
+                               krb5_init_creds_context ctx,
+                               krb5_principal *client);
 
 struct _krb5_tkt_creds_context;
 typedef struct _krb5_tkt_creds_context *krb5_tkt_creds_context;
