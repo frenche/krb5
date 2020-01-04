@@ -182,6 +182,7 @@ struct _krb5_gc_creds_context {
     krb5_error_code reply_code; /* Error status from TGS reply */
     krb5_data *caller_out;      /* Caller's out parameter */
     krb5_data *caller_realm;    /* Caller's realm parameter */
+    unsigned int *caller_flags; /* Caller's flags parameter */
 };
 
 /* Convert ticket flags to necessary KDC options */
@@ -212,6 +213,7 @@ set_caller_request(krb5_context context, krb5_gc_creds_context ctx)
 
     *ctx->caller_out = out_copy;
     *ctx->caller_realm = realm_copy;
+    *ctx->caller_flags = KRB5_TKT_CREDS_STEP_FLAG_CONTINUE;
     return 0;
 
 cleanup:
@@ -364,8 +366,13 @@ get_creds_from_tgs_reply(krb5_context context, krb5_gc_creds_context ctx,
                                      ctx->tgs_in_creds, ctx->timestamp,
                                      ctx->nonce, ctx->subkey, NULL, NULL,
                                      &ctx->reply_creds);
-    if (code == KRB5KRB_ERR_RESPONSE_TOO_BIG)
-        return code;
+    if (code == KRB5KRB_ERR_RESPONSE_TOO_BIG) {
+        /* Instruct the caller to re-send the request with TCP. */
+        code = set_caller_request(context, ctx);
+        if (code != 0)
+            return code;
+        return KRB5KRB_ERR_RESPONSE_TOO_BIG;
+    }
 
     /* Depending on our state, we may or may not be able to handle an error.
      * For now, store it in the context and return success. */
@@ -1101,7 +1108,7 @@ k5_gc_tgs_init(krb5_context context, k5_tkt_creds_in_data in_data,
 
 krb5_error_code
 k5_gc_tgs_step(krb5_context context, krb5_gc_creds_context ctx, krb5_data *in,
-               krb5_data *out, krb5_data *realm, krb5_boolean *need_continue,
+               krb5_data *out, krb5_data *realm, unsigned int *flags,
                krb5_creds **reply_creds)
 {
     krb5_error_code code;
@@ -1109,8 +1116,7 @@ k5_gc_tgs_step(krb5_context context, krb5_gc_creds_context ctx, krb5_data *in,
 
     *out = empty_data();
     *realm = empty_data();
-    *need_continue = FALSE;
-    *reply_creds = NULL;
+    *flags = 0;
 
     /* We should receive an empty input on the first step only, and should not
      * get called after completion. */
@@ -1120,46 +1126,27 @@ k5_gc_tgs_step(krb5_context context, krb5_gc_creds_context ctx, krb5_data *in,
 
     ctx->caller_out = out;
     ctx->caller_realm = realm;
+    ctx->caller_flags = flags;
 
     if (!no_input) {
         /* Convert the input token into a credential and store it in ctx. */
         code = get_creds_from_tgs_reply(context, ctx, in);
-        if (code == KRB5KRB_ERR_RESPONSE_TOO_BIG) {
-            code = set_caller_request(context, ctx);
-            if (code != 0)
-                return code;
-            /* Instruct the caller to re-send the request with TCP. */
-            *need_continue = TRUE;
-            return KRB5KRB_ERR_RESPONSE_TOO_BIG;
-        }
         if (code != 0)
             return code;
     }
 
     if (ctx->state == STATE_BEGIN)
-        code = begin(context, ctx);
+        return begin(context, ctx);
     else if (ctx->state == STATE_GET_TGT)
-        code = step_get_tgt(context, ctx);
+        return step_get_tgt(context, ctx);
     else if (ctx->state == STATE_GET_TGT_OFFPATH)
-        code = step_get_tgt_offpath(context, ctx);
+        return step_get_tgt_offpath(context, ctx);
     else if (ctx->state == STATE_REFERRALS)
-        code = step_referrals(context, ctx);
+        return step_referrals(context, ctx);
     else if (ctx->state == STATE_NON_REFERRAL)
-        code = step_non_referral(context, ctx);
+        return step_non_referral(context, ctx);
     else
-        code = EINVAL;
-
-    if (code != 0)
-        return code;
-
-    if (ctx->state == STATE_COMPLETE) {
-        *reply_creds = ctx->reply_creds;
-        ctx->reply_creds = NULL;
-    } else {
-        *need_continue = TRUE;
-    }
-
-    return 0;
+        return EINVAL;
 }
 
 void

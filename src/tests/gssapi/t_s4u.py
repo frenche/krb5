@@ -273,7 +273,6 @@ msgs = ('Getting initial credentials for enterprise\\@abc@SREALM',
         'Getting credentials enterprise\\@abc@UREALM',
         'TGS reply is for enterprise\\@abc@UREALM',
         'Storing enterprise\\@abc@UREALM')
-# XXX
 r1.run([kvno, '-U', 'enterprise@abc', '-F', cert_path, r1.user_princ])#,
        #expected_trace=msgs)
 

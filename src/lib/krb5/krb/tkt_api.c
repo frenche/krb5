@@ -146,7 +146,6 @@ krb5_tkt_creds_step(krb5_context context, krb5_tkt_creds_context ctx,
                     unsigned int *flags)
 {
     krb5_error_code code;
-    krb5_boolean continuation_needed = FALSE;
 
     /* We should not get called after completion. */
     if (ctx->state == STATE_COMPLETE)
@@ -176,23 +175,21 @@ krb5_tkt_creds_step(krb5_context context, krb5_tkt_creds_context ctx,
     }
 
     if (ctx->gc_type == GC_TGS)
-        code = k5_gc_tgs_step(context, ctx->gc_ctx, in, out, realm,
-                              &continuation_needed, &ctx->reply_creds);
+        code = k5_gc_tgs_step(context, ctx->gc_ctx, in, out, realm, flags,
+                              &ctx->reply_creds);
     else if (ctx->gc_type == GC_S4U2S)
-        code = k5_gc_s4u2s_step(context, ctx->s4u2s_ctx, in, out, realm,
-                                &continuation_needed, &ctx->reply_creds);
+        code = k5_gc_s4u2s_step(context, ctx->s4u2s_ctx, in, out, realm, flags,
+                                &ctx->reply_creds);
     else if (ctx->gc_type == GC_S4U2P)
-        code = k5_gc_s4u2p_step(context, ctx->s4u2p_ctx, in, out, realm,
-                                &continuation_needed, &ctx->reply_creds);
+        code = k5_gc_s4u2p_step(context, ctx->s4u2p_ctx, in, out, realm, flags,
+                                &ctx->reply_creds);
     else
         code = EINVAL;
-
-    *flags = continuation_needed ? KRB5_TKT_CREDS_STEP_FLAG_CONTINUE : 0;
 
     if (code != 0)
         return code;
 
-    if (!continuation_needed)
+    if (!(*flags & KRB5_TKT_CREDS_STEP_FLAG_CONTINUE))
         ctx->state = STATE_COMPLETE;
 
     return 0;

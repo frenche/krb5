@@ -72,7 +72,7 @@ typedef struct _caller_data {
     krb5_data *in;
     krb5_data *out;
     krb5_data *realm;
-    krb5_boolean *continue_needed;
+    unsigned int *flags;
     krb5_creds **reply_creds;
 } caller_data;
 
@@ -140,7 +140,7 @@ send_request(krb5_context context, single_request *req,
 
     *caller_out->out = out_copy;
     *caller_out->realm = realm_copy;
-    *caller_out->continue_needed = TRUE;
+    *caller_out->flags = KRB5_TKT_CREDS_STEP_FLAG_CONTINUE;
     return 0;
 }
 
@@ -789,7 +789,7 @@ get_tgt_to_client_realm(krb5_context context, krb5_s4u2s_creds_context ctx)
     }
 
     if (flags & KRB5_TKT_CREDS_STEP_FLAG_CONTINUE)
-        *ctx->caller.continue_needed = TRUE;
+        *ctx->caller.flags = KRB5_TKT_CREDS_STEP_FLAG_CONTINUE;
 
     return code;
 }
@@ -871,7 +871,7 @@ identify_client_realm(krb5_context context, krb5_s4u2s_creds_context ctx)
     }
 
     if (flags & KRB5_INIT_CREDS_STEP_FLAG_CONTINUE)
-        *ctx->caller.continue_needed = TRUE;
+        *ctx->caller.flags = KRB5_TKT_CREDS_STEP_FLAG_CONTINUE;
 
     return code;
 }
@@ -1013,19 +1013,19 @@ k5_gc_s4u2s_init(krb5_context context, k5_tkt_creds_in_data in_data,
 krb5_error_code
 k5_gc_s4u2s_step(krb5_context context, krb5_s4u2s_creds_context ctx,
                  krb5_data *in, krb5_data *out, krb5_data *realm,
-                 krb5_boolean *continue_needed, krb5_creds **reply_creds)
+                 unsigned int *flags, krb5_creds **reply_creds)
 {
     krb5_boolean no_input = (in == NULL || in->length == 0);
 
     *out = empty_data();
     *realm = empty_data();
-    *continue_needed = FALSE;
+    *flags = 0;
     *reply_creds = NULL;
 
     ctx->caller.in = in;
     ctx->caller.out = out;
     ctx->caller.realm = realm;
-    ctx->caller.continue_needed = continue_needed;
+    ctx->caller.flags = flags;
     ctx->caller.reply_creds = reply_creds;
 
     /* We should receive an empty input on the first step only, and should not

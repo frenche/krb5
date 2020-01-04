@@ -408,7 +408,7 @@ krb5_error_code k5_gc_tgs_step(krb5_context context,
                                krb5_gc_creds_context ctx,
                                krb5_data *in, krb5_data *out,
                                krb5_data *realm,
-                               krb5_boolean *need_continue,
+                               unsigned int *flags,
                                krb5_creds **reply_creds);
 
 void k5_gc_tgs_free(krb5_context context, krb5_gc_creds_context ctx);
@@ -423,7 +423,7 @@ krb5_error_code k5_gc_s4u2s_step(krb5_context context,
                                  krb5_s4u2s_creds_context ctx,
                                  krb5_data *in, krb5_data *out,
                                  krb5_data *realm,
-                                 krb5_boolean *need_continue,
+                                 unsigned int *flags,
                                  krb5_creds **reply_creds);
 
 void k5_gc_s4u2s_free(krb5_context context, krb5_s4u2s_creds_context ctx);
@@ -438,7 +438,7 @@ krb5_error_code k5_gc_s4u2p_step(krb5_context context,
                                  krb5_s4u2p_creds_context ctx,
                                  krb5_data *in, krb5_data *out,
                                  krb5_data *realm,
-                                 krb5_boolean *need_continue,
+                                 unsigned int *flags,
                                  krb5_creds **reply_creds);
 
 void k5_gc_s4u2p_free(krb5_context context, krb5_s4u2p_creds_context ctx);
