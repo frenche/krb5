@@ -359,6 +359,10 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
             goto cleanup;
 
         assert(krb5_is_tgs_principal(header_ticket->server));
+
+        krb5_db_free_authdata_info(kdc_context, ad_info);
+        ad_info = stkt_ad_info;
+        stkt_ad_info = NULL;
     }
 
     au_state->stage = ISSUE_TKT;
@@ -636,8 +640,8 @@ process_tgs_req(krb5_kdc_req *request, krb5_data *pkt,
                               subkey != NULL ? subkey :
                               header_ticket->enc_part2->session,
                               encrypting_key, subject_key, pkt, request,
-                              altcprinc, stkt_ad_info ? stkt_ad_info : ad_info,
-                              subject_tkt, &auth_indicators, &enc_tkt_reply);
+                              altcprinc, ad_info, subject_tkt,
+                              &auth_indicators, &enc_tkt_reply);
     if (errcode) {
         krb5_klog_syslog(LOG_INFO, _("TGS_REQ : handle_authdata (%d)"),
                          errcode);
