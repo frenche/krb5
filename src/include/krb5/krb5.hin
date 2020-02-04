@@ -8393,6 +8393,13 @@ krb5_pac_sign_ext(krb5_context context, krb5_pac pac, krb5_timestamp authtime,
 krb5_error_code KRB5_CALLCONV
 krb5_pac_get_client_info(krb5_context context, const krb5_pac pac,
                          krb5_timestamp *authtime_out, char **princname_out);
+/*
+ *
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_not_delegated(krb5_context context, krb5_pac pac,
+                           krb5_boolean *not_delegated);
+
 
 /**
  * Allow the appplication to override the profile's allow_weak_crypto setting.

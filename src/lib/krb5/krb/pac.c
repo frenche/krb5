@@ -682,6 +682,45 @@ krb5_pac_verify_ext(krb5_context context,
     return 0;
 }
 
+#define UAC_OFFSET 184
+static krb5_error_code
+k5_pac_get_uac(krb5_context context, krb5_pac pac, uint32_t *uac)
+{
+    krb5_error_code ret;
+    krb5_data logon_info;
+    unsigned char *p;
+
+    ret = krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO, &logon_info);
+    if (ret != 0)
+        return ret;
+
+    p = (unsigned char *) logon_info.data;
+    p += UAC_OFFSET;
+
+    *uac = load_32_le(p);
+
+    krb5_free_data_contents(context, &logon_info);
+
+    return 0;
+}
+
+#define UAC_NOT_DELEGATED 0x4000 // 0x00100000 per doc, endianness?
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_not_delegated(krb5_context context, krb5_pac pac,
+                           krb5_boolean *not_delegated)
+{
+    krb5_error_code ret;
+    uint32_t uac;
+
+    ret = k5_pac_get_uac(context, pac, &uac);
+    if (ret != 0)
+        return ret;
+
+    *not_delegated = uac & UAC_NOT_DELEGATED;
+
+    return 0;
+}
+
 /*
  * PAC auth data attribute backend
  */

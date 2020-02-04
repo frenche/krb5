@@ -1660,7 +1660,33 @@ k5_gc_s4u2p_free(krb5_context context, krb5_s4u2p_creds_context ctx)
     clean_referral_tgts(context, &ctx->proxy_referral_storage);
     clean_single_request(context, &ctx->req);
     free(ctx);
+}
 
+static krb5_boolean
+sensitive_principal(krb5_context context, krb5_authdata **ev_tkt_ad)
+{
+    krb5_error_code code;
+    krb5_authdata **win2k_pac = NULL;
+    krb5_pac pac;
+    krb5_boolean not_delegated;
+
+    code = krb5_find_authdata(context, ev_tkt_ad, NULL, KRB5_AUTHDATA_WIN2K_PAC,
+                              &win2k_pac);
+    if (code != 0 || win2k_pac == NULL)
+        return TRUE;
+
+    code = krb5_pac_parse(context, win2k_pac[0]->contents,
+                          win2k_pac[0]->length, &pac);
+    krb5_free_authdata(context, win2k_pac);
+    if (code != 0)
+        return TRUE;
+
+    code = krb5_pac_get_not_delegated(context, pac, &not_delegated);
+    krb5_pac_free(context, pac);
+    if (code != 0)
+        return TRUE;
+
+    return not_delegated;
 }
 
 /*
@@ -1699,6 +1725,14 @@ krb5_get_credentials_for_proxy(krb5_context context,
         !krb5_principal_compare(context, evidence_tkt->enc_part2->client,
                                 in_creds->client)) {
         code = EINVAL;
+        goto cleanup;
+    }
+
+    if (evidence_tkt->enc_part2 != NULL &&
+        (evidence_tkt->enc_part2->flags & TKT_FLG_FORWARDABLE) == 0 &&
+        sensitive_principal(context,
+                            evidence_tkt->enc_part2->authorization_data)) {
+        code = KRB5_TKT_NOT_FORWARDABLE;
         goto cleanup;
     }
 
