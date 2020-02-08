@@ -684,22 +684,14 @@ krb5_pac_verify_ext(krb5_context context,
 
 #define UAC_OFFSET 184
 static krb5_error_code
-k5_pac_get_uac(krb5_context context, krb5_pac pac, uint32_t *uac)
+k5_pac_get_uac(krb5_context context, krb5_data logon_info, uint32_t *uac)
 {
-    krb5_error_code ret;
-    krb5_data logon_info;
     unsigned char *p;
-
-    ret = krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO, &logon_info);
-    if (ret != 0)
-        return ret;
 
     p = (unsigned char *) logon_info.data;
     p += UAC_OFFSET;
 
     *uac = load_32_le(p);
-
-    krb5_free_data_contents(context, &logon_info);
 
     return 0;
 }
@@ -710,9 +702,15 @@ krb5_pac_get_not_delegated(krb5_context context, krb5_pac pac,
                            krb5_boolean *not_delegated)
 {
     krb5_error_code ret;
+    krb5_data logon_info;
     uint32_t uac;
 
-    ret = k5_pac_get_uac(context, pac, &uac);
+    ret = krb5_pac_get_buffer(context, pac, KRB5_PAC_LOGON_INFO, &logon_info);
+    if (ret != 0)
+        return ret;
+
+    ret = k5_pac_get_uac(context, logon_info, &uac);
+    krb5_free_data_contents(context, &logon_info);
     if (ret != 0)
         return ret;
 
@@ -892,6 +890,7 @@ mspac_request_fini(krb5_context kcontext,
 }
 
 #define STRLENOF(x) (sizeof((x)) - 1)
+#define KRB5_PAC_NOT_DELEGATED 1667
 
 static struct {
     krb5_ui_4 type;
@@ -924,6 +923,21 @@ static struct {
 
 #define MSPAC_ATTRIBUTE_COUNT   (sizeof(mspac_attribute_types)/sizeof(mspac_attribute_types[0]))
 
+static struct {
+    krb5_ui_4 type;
+    int buff_attr_len;
+    krb5_data attribute;
+} mspac_inner_attributes[] = {
+    { KRB5_PAC_NOT_DELEGATED, STRLENOF("urn:mspac:logon-info"),
+      { KV5M_DATA, STRLENOF("urn:mspac:logon-info:uac"),
+        "urn:mspac:logon-info:uac" } },
+    { KRB5_PAC_NOT_DELEGATED, STRLENOF("urn:mspac:logon-info"),
+      { KV5M_DATA, STRLENOF("urn:mspac:logon-info:uac:not_delegated"),
+        "urn:mspac:logon-info:uac:not_delegated" } },
+};
+
+#define MSPAC_INNER_ATTRIBUTE_COUNT   (sizeof(mspac_inner_attributes)/sizeof(mspac_inner_attributes[0]))
+
 static krb5_error_code
 mspac_type2attr(krb5_ui_4 type, krb5_data *attr)
 {
@@ -932,6 +946,12 @@ mspac_type2attr(krb5_ui_4 type, krb5_data *attr)
     for (i = 0; i < MSPAC_ATTRIBUTE_COUNT; i++) {
         if (mspac_attribute_types[i].type == type) {
             *attr = mspac_attribute_types[i].attribute;
+            return 0;
+        }
+    }
+    for (i = 0; i < MSPAC_INNER_ATTRIBUTE_COUNT; i++) {
+        if (mspac_inner_attributes[i].type == type) {
+            *attr = mspac_inner_attributes[i].attribute;
             return 0;
         }
     }
@@ -944,6 +964,13 @@ mspac_attr2type(const krb5_data *attr, krb5_ui_4 *type)
 {
     unsigned int i;
 
+    for (i = 0; i < MSPAC_INNER_ATTRIBUTE_COUNT; i++) {
+        if (attr->length == mspac_inner_attributes[i].attribute.length &&
+            strncasecmp(attr->data, mspac_inner_attributes[i].attribute.data, attr->length) == 0) {
+            *type = mspac_inner_attributes[i].type;
+            return 0;
+        }
+    }
     for (i = 0; i < MSPAC_ATTRIBUTE_COUNT; i++) {
         if (attr->length == mspac_attribute_types[i].attribute.length &&
             strncasecmp(attr->data, mspac_attribute_types[i].attribute.data, attr->length) == 0) {
@@ -1028,16 +1055,16 @@ mspac_get_attribute_types(krb5_context kcontext,
 }
 
 static krb5_error_code
-mspac_get_attribute(krb5_context kcontext,
-                    krb5_authdata_context context,
-                    void *plugin_context,
-                    void *request_context,
-                    const krb5_data *attribute,
-                    krb5_boolean *authenticated,
-                    krb5_boolean *complete,
-                    krb5_data *value,
-                    krb5_data *display_value,
-                    int *more)
+mspac_get_buffer(krb5_context kcontext,
+                 krb5_authdata_context context,
+                 void *plugin_context,
+                 void *request_context,
+                 const krb5_data *attribute,
+                 krb5_boolean *authenticated,
+                 krb5_boolean *complete,
+                 krb5_data *value,
+                 krb5_data *display_value,
+                 int *more)
 {
     struct mspac_context *pacctx = (struct mspac_context *)request_context;
     krb5_error_code code;
@@ -1083,6 +1110,51 @@ mspac_get_attribute(krb5_context kcontext,
     *more = 0;
 
     return code;
+}
+
+static krb5_error_code
+mspac_get_attribute(krb5_context kcontext,
+                    krb5_authdata_context context,
+                    void *plugin_context,
+                    void *request_context,
+                    const krb5_data *attribute,
+                    krb5_boolean *authenticated,
+                    krb5_boolean *complete,
+                    krb5_data *value,
+                    krb5_data *display_value,
+                    int *more)
+{
+    krb5_error_code code;
+    krb5_data buffer_attr;
+    krb5_data buffer_data;
+    uint32_t uac;
+    unsigned int i;
+
+    for (i = 0; i < MSPAC_INNER_ATTRIBUTE_COUNT; i++) {
+        if (attribute->length == mspac_inner_attributes[i].attribute.length &&
+            strncasecmp(attribute->data, mspac_inner_attributes[i].attribute.data, attribute->length) == 0) {
+            memcpy(&buffer_attr.data, &attribute->data, mspac_inner_attributes[i].buff_attr_len); 
+            buffer_attr.length = mspac_inner_attributes[i].buff_attr_len; 
+
+            code = mspac_get_buffer(kcontext, context, plugin_context,
+                                    request_context, &buffer_attr, authenticated,
+                                    complete, &buffer_data, display_value, more);
+            if (code != 0)
+                return code;
+
+            code = k5_pac_get_uac(kcontext, buffer_data, &uac);
+            if (code != 0)
+                return code;
+
+            value->data = uac & UAC_NOT_DELEGATED ? "true" : "false";
+            value->length = uac & UAC_NOT_DELEGATED ? 4 : 5;
+            return 0;
+        }
+    }
+
+    return mspac_get_buffer(kcontext, context, plugin_context, request_context,
+                            attribute, authenticated, complete, value,
+                            display_value, more);
 }
 
 static krb5_error_code
