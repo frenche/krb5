@@ -1317,7 +1317,7 @@ t_pac.so t_pac.po $(OUTPRE)t_pac.$(OBJEXT): $(BUILDTOP)/include/autoconf.h \
   $(top_srcdir)/include/k5-thread.h $(top_srcdir)/include/k5-trace.h \
   $(top_srcdir)/include/krb5.h $(top_srcdir)/include/krb5/authdata_plugin.h \
   $(top_srcdir)/include/krb5/plugin.h $(top_srcdir)/include/port-sockets.h \
-  $(top_srcdir)/include/socket-utils.h t_pac.c
+  $(top_srcdir)/include/socket-utils.h t_pac.h t_pac.c
 t_parse_host_string.so t_parse_host_string.po $(OUTPRE)t_parse_host_string.$(OBJEXT): \
   $(BUILDTOP)/include/autoconf.h $(BUILDTOP)/include/krb5/krb5.h \
   $(BUILDTOP)/include/osconf.h $(BUILDTOP)/include/profile.h \
