@@ -8400,6 +8400,97 @@ krb5_error_code KRB5_CALLCONV
 krb5_pac_get_not_delegated(krb5_context context, krb5_pac pac,
                            krb5_boolean *not_delegated);
 
+struct rpc_unicode_string {
+     unsigned int max_length;
+     unsigned int length;
+     char *data;
+};
+
+struct group_membership {
+    krb5_ui_4 relative_id;
+    krb5_ui_4 attributes;
+};
+
+struct rpc_sid {
+    unsigned char revision;
+    unsigned char sub_authority_count;
+    unsigned char identifier_authority[6];
+    krb5_ui_4 *sub_authority;
+};
+
+struct sid_and_attributes {
+    struct rpc_sid *sid;
+    krb5_ui_4 attributes;
+};
+
+struct kerb_validation_info {
+    int64_t logon_time;
+    int64_t logoff_time;
+    int64_t kickoff_time;
+    int64_t pass_last_set;
+    int64_t pass_can_change;
+    int64_t pass_must_change;
+    struct rpc_unicode_string effective_name;
+    struct rpc_unicode_string full_name;
+    struct rpc_unicode_string logon_script;
+    struct rpc_unicode_string profile_path;
+    struct rpc_unicode_string home_directory;
+    struct rpc_unicode_string home_directory_drive;
+    krb5_ui_2 logon_count;
+    krb5_ui_2 bad_pass_count;
+    krb5_ui_4 user_id;
+    krb5_ui_4 primary_group_id;
+    krb5_ui_4 group_count;
+    struct group_membership *group_ids;
+    krb5_ui_4 user_flags;
+    char user_session_key[16];
+    struct rpc_unicode_string logon_server;
+    struct rpc_unicode_string logon_domain_name;
+    struct rpc_sid *logon_domain_id;
+    krb5_ui_4 user_account_control;
+    krb5_ui_4 sid_count;
+    struct sid_and_attributes *extra_sids;
+    struct rpc_sid *resource_group_domain_sid;
+    krb5_ui_4 resource_group_count;
+    struct group_membership *resource_group_ids;
+};
+
+/*
+ *
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_logon_info(krb5_context context, krb5_pac pac,
+                        struct kerb_validation_info *logon_info);
+
+struct delegation_info {
+    struct rpc_unicode_string s4u2proxy_target;
+    krb5_ui_4 trans_size;
+    struct rpc_unicode_string *s4u_trans;
+
+/* HELP */
+    unsigned int s4u2proxy_target_max;
+    unsigned int *s4u_trans_max;
+};
+
+/*
+ *
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_delegation_info(krb5_context context, krb5_pac pac,
+                             struct delegation_info *deleg_info);
+
+struct upn_dns_info {
+    krb5_data upn;
+    krb5_data dns_domain_name;
+    krb5_ui_4 flags;
+};
+
+/*
+ *
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_upn_dns_info(krb5_context context, krb5_pac pac,
+                          struct upn_dns_info *dns_info);
 
 /**
  * Allow the appplication to override the profile's allow_weak_crypto setting.

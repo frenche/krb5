@@ -135,11 +135,37 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 err(context, ret, "[pac: %s] krb5_pac_get_buffer", p->pac_name);
 
             if (list[i] == 1) {
+                struct kerb_validation_info logon_info;
+
+                ret = krb5_pac_get_logon_info(context, pac, &logon_info);
+                if (ret)
+                    err(context, ret, "krb5_pac_get_logon_info");
+
+                //free_pac_logon_info(context, logon_info);
+
                 if (p->type_length != data.length) {
                     err(context, 0, "[pac: %s] type 1 have wrong length: %lu",
                         p->pac_name, (unsigned long)data.length);
                 }
-            } else if (list[i] != 12 && list[i] != 11) {
+            } else if (list[i] == 11) {
+                struct delegation_info deleg_info;
+
+                ret = krb5_pac_get_delegation_info(context, pac, &deleg_info);
+                if (ret)
+                    err(context, ret, "krb5_pac_get_delegation_info");
+
+                //free_pac_delegation_info(context, deleg_info);
+
+            } else if (list[i] == 12) {
+                struct upn_dns_info upn_info;
+
+                ret = krb5_pac_get_upn_dns_info(context, pac, &upn_info);
+                if (ret)
+                    err(context, ret, "krb5_pac_get_upn_dns_info");
+
+                //free_pac_upn_dns_info(context, upn_info);
+
+            } else {
                 err(context, 0, "[pac: %s] unknown type %lu",
                     p->pac_name, (unsigned long)list[i]);
             }

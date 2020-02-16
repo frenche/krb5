@@ -719,6 +719,492 @@ krb5_pac_get_not_delegated(krb5_context context, krb5_pac pac,
     return 0;
 }
 
+#define REFERANT_ID_LENGTH 4
+#define CV_STR_LEN_REF 8
+#define CV_STR_HEADER 12
+#define RPC_HEADERS  16
+
+#define PAC_LOGON_INFO_LENGTH 236
+#define PAC_DELEGATION_INFO_LENGTH 36
+#define PAC_UPN_DNS_INFO_LENGTH 16
+
+#define check_ret_p(ret, p , used) \
+    if (ret != 0)                  \
+        return ret;                \
+    p += used;
+
+static krb5_error_code
+reserved_zero(unsigned char *p, unsigned int plen, unsigned int num_reserved)
+{
+    unsigned int i;
+    krb5_ui_4 reserved;
+
+    if (plen < num_reserved * 4)
+        return ERANGE;
+
+    for (i = 0; i < num_reserved; i++) {
+        reserved = load_32_le(p);
+        if (reserved != 0)
+             return ERANGE;
+        p += 4;
+    }
+
+    return 0;
+}
+
+static krb5_error_code
+rpc_unicode_string_len_ref(unsigned char *p, unsigned int plen,
+                           struct rpc_unicode_string *str)
+{
+    unsigned short length, max_length;
+
+    if (plen < CV_STR_LEN_REF)
+        return ERANGE;
+
+    length = load_16_le(p);
+    p += 2;
+    max_length = load_16_le(p);
+    p += 2;
+
+    if (length > max_length || length % 2 || max_length % 2)
+        return ERANGE;
+
+    str->length = (unsigned int)length;
+    str->max_length = (unsigned int)max_length;
+
+    return 0;
+}
+
+static krb5_error_code
+rpc_unicode_string_data(unsigned char *p, unsigned int plen,
+                        struct rpc_unicode_string *str, unsigned int *used)
+{
+    krb5_error_code ret;
+    unsigned int align, length, max_length;
+
+    align = ((str->length / 2) % 2 ) * 2;
+    if (plen < CV_STR_HEADER + str->length + align)
+        return ERANGE;
+
+    max_length = load_32_le(p);
+    p += 4;
+    reserved_zero(p, plen - 4, 1);
+    p += 4;
+    length = load_32_le(p);
+    p += 4;
+
+    if (length != str->length / 2 || max_length != str->max_length / 2)
+        return ERANGE;
+
+    ret = k5_utf16le_to_utf8(p, str->length, &str->data);
+    if (ret != 0)
+        return ret;
+    p += str->length;
+
+    *used = CV_STR_HEADER + str->length + align;
+    str->length /= 2;
+    str->max_length /= 2;
+
+    return 0;
+}
+
+static krb5_error_code
+rpc_group_membership_array(unsigned char *p, unsigned int plen,
+                           krb5_ui_4 group_count,
+                           struct group_membership **group_ids_out,
+                           unsigned int *used)
+{
+    krb5_error_code ret;
+    struct group_membership *group_ids;
+    unsigned int count, i;
+
+    if (group_count == 0)
+        return 0;
+    if (plen < 4)
+         return ERANGE;
+
+    count = load_32_le(p);
+    if (count != group_count || plen < 4 + count * 8)
+         return ERANGE;
+    p += 4;
+
+    group_ids = k5alloc(group_count * sizeof(struct group_membership), &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    for (i = 0; i < count; i++) {
+        group_ids[i].relative_id = load_32_le(p);
+        p += 4;
+        group_ids[i].attributes = load_32_le(p);
+        p += 4;
+    }
+
+    *group_ids_out = group_ids;
+    *used = 4 + count * 8;
+
+    return 0;
+}
+
+static krb5_error_code
+rpc_sid(unsigned char *p, unsigned int plen, struct rpc_sid **sid_out,
+        unsigned int *used)
+{
+    krb5_error_code ret;
+    unsigned int count, i;
+    struct rpc_sid *sid;
+
+    if (plen < 12)
+         return ERANGE;
+
+    count = load_32_le(p);
+    p += 4;
+
+    if (*p != 1)
+         return ERANGE;
+    p += 1;
+
+    if (*p != count || plen < 12 + count * 4)
+         return ERANGE;
+
+    sid = k5alloc(sizeof(struct rpc_sid), &ret);
+    if (ret != 0)
+        return ENOMEM;
+    sid->sub_authority = k5alloc(count * 4, &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    sid->sub_authority_count = *p;
+    p += 1;
+    memcpy(sid->identifier_authority, p, 6);
+    p += 6;
+
+    for (i = 0; i < count; i++) {
+        sid->sub_authority[i] = load_32_le(p);
+        p += 4;
+    }
+
+    *sid_out = sid;
+    *used = 12 + count * 4;
+
+    return 0;
+}
+
+static krb5_error_code
+rpc_sid_and_attributes_array(unsigned char *p, unsigned int plen,
+                             krb5_ui_4 sid_count,
+                             struct sid_and_attributes **sids_out,
+                             unsigned int *used)
+{
+    krb5_error_code ret;
+    unsigned char *p0;
+    krb5_ui_4 count;
+    struct sid_and_attributes *sids;
+    unsigned int i, used2;
+
+    if (sid_count == 0)
+        return 0;
+    if (plen < 4)
+         return ERANGE;
+
+    p0 = p;
+
+    count = load_32_le(p);
+    if (count != sid_count || plen < 4 + count * 8)
+         return ERANGE;
+    p += 4;
+
+    sids = k5alloc(count * sizeof(struct sid_and_attributes), &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    for (i = 0; i < count; i++) {
+        p += REFERANT_ID_LENGTH;
+        sids[i].attributes = load_32_le(p);
+        p += 4;
+    }
+    for (i = 0; i < count; i++) {
+        ret = rpc_sid(p, plen - (p - p0), &sids[i].sid, &used2);
+        if (ret != 0)
+            return ret;
+        p += used2;
+    }
+
+    *sids_out = sids;
+    *used = p - p0;
+
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_logon_info(krb5_context context, krb5_pac pac,
+                        struct kerb_validation_info *logon_info_out)
+{
+    krb5_error_code ret;
+    krb5_data pac_li;
+    unsigned char *p, *pend;
+    unsigned int used;
+    struct kerb_validation_info li;
+    krb5_ui_4 ld_sid_ref_id, rgd_sid_ref_id;
+
+    ret = k5_pac_locate_buffer(context, pac, KRB5_PAC_LOGON_INFO,
+                               &pac_li);
+    if (ret != 0)
+        return ret;
+
+    if (pac_li.length < PAC_LOGON_INFO_LENGTH)
+        return ERANGE;
+
+    p = (unsigned char *)pac_li.data;
+    pend = p + pac_li.length;
+    p += RPC_HEADERS + REFERANT_ID_LENGTH;
+
+    li.logon_time = load_64_le(p);
+    p += 8;
+    li.logoff_time = load_64_le(p);
+    p += 8;
+    li.kickoff_time = load_64_le(p);
+    p += 8;
+    li.pass_last_set = load_64_le(p);
+    p += 8;
+    li.pass_can_change = load_64_le(p);
+    p += 8;
+    li.pass_must_change = load_64_le(p);
+    p += 8;
+
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.effective_name);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.full_name);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.logon_script);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.profile_path);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.home_directory);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.home_directory_drive);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+
+    li.logon_count = load_16_le(p);
+    p += 2;
+    li.bad_pass_count = load_16_le(p);
+    p += 2;
+    li.user_id = load_32_le(p);
+    p += 4;
+    li.primary_group_id = load_32_le(p);
+    p += 4;
+    li.group_count = load_32_le(p);
+    p += 4;
+
+    p += REFERANT_ID_LENGTH; /* GroupIds */
+
+    li.user_flags = load_32_le(p);
+    p += 4;
+
+    memcpy(li.user_session_key, p, 16);
+    p += 16;
+
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.logon_server);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+    ret = rpc_unicode_string_len_ref(p, pend - p, &li.logon_domain_name);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+
+    ld_sid_ref_id = load_32_le(p);
+    p += REFERANT_ID_LENGTH; /* LogonDomainId */
+
+    reserved_zero(p, pend - p, 2);
+    p += 2 * 4;
+    li.user_account_control = load_32_le(p);
+    p += 4;
+    reserved_zero(p, pend - p, 7);
+    p += 7 * 4;
+
+    li.sid_count = load_32_le(p);
+    p += 4;
+    p += REFERANT_ID_LENGTH; /* ExtraSids */
+
+    rgd_sid_ref_id = load_32_le(p);
+    p += REFERANT_ID_LENGTH; /* ResourceGroupDomainSid */
+
+    li.resource_group_count = load_32_le(p);
+    p += 4;
+    p += REFERANT_ID_LENGTH; /* ResourceGroupIds */
+
+    /* start of data */
+    ret = rpc_unicode_string_data(p, pend - p, &li.effective_name, &used);
+    check_ret_p(ret, p , used);
+    ret = rpc_unicode_string_data(p, pend - p, &li.full_name, &used);
+    check_ret_p(ret, p , used);
+    ret = rpc_unicode_string_data(p, pend - p, &li.logon_script, &used);
+    check_ret_p(ret, p , used);
+    ret = rpc_unicode_string_data(p, pend - p, &li.profile_path, &used);
+    check_ret_p(ret, p , used);
+    ret = rpc_unicode_string_data(p, pend - p, &li.home_directory, &used);
+    check_ret_p(ret, p , used);
+    ret = rpc_unicode_string_data(p, pend - p, &li.home_directory_drive, &used);
+    check_ret_p(ret, p , used);
+
+    ret = rpc_group_membership_array(p, pend - p, li.group_count,
+                                     &li.group_ids, &used);
+    if (ret != 0)
+        return ret;
+    p += used;
+
+    ret = rpc_unicode_string_data(p, pend - p, &li.logon_server, &used);
+    check_ret_p(ret, p , used);
+    ret = rpc_unicode_string_data(p, pend - p, &li.logon_domain_name, &used);
+    check_ret_p(ret, p , used);
+
+    li.logon_domain_id = NULL;
+    if (ld_sid_ref_id != 0) {
+        ret = rpc_sid(p, pend - p, &li.logon_domain_id, &used);
+        if (ret != 0)
+            return ret;
+        p += used;
+    }
+
+    ret = rpc_sid_and_attributes_array(p, pend - p, li.sid_count,
+                                       &li.extra_sids, &used);
+    if (ret != 0)
+        return ret;
+    p += used;
+
+    li.resource_group_domain_sid = NULL;
+    if (rgd_sid_ref_id != 0) {
+        ret = rpc_sid(p, pend - p, &li.resource_group_domain_sid, &used);
+        if (ret != 0)
+            return ret;
+        p += used;
+    }
+
+    ret = rpc_group_membership_array(p, pend - p, li.resource_group_count,
+                                     &li.resource_group_ids, &used);
+    if (ret != 0)
+        return ret;
+    p += used;
+
+    *logon_info_out = li;
+
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_delegation_info(krb5_context context, krb5_pac pac,
+                             struct delegation_info *deleg_info_out)
+{
+    krb5_error_code ret;
+    krb5_data pac_di;
+    unsigned char *p, *pend;
+    struct delegation_info di;
+    unsigned int used, i;
+    krb5_ui_4 trans_size;
+
+    ret = k5_pac_locate_buffer(context, pac, KRB5_PAC_DELEGATION_INFO,
+                               &pac_di);
+    if (ret != 0)
+        return ret;
+
+    if (pac_di.length < PAC_DELEGATION_INFO_LENGTH)
+        return ERANGE;
+
+    p = (unsigned char *)pac_di.data;
+    pend = p + pac_di.length;
+    p += RPC_HEADERS + REFERANT_ID_LENGTH;
+
+    ret = rpc_unicode_string_len_ref(p, pend - p, &di.s4u2proxy_target);
+    check_ret_p(ret, p , CV_STR_LEN_REF);
+
+    di.trans_size  = load_32_le(p);
+    p += 4;
+    p += REFERANT_ID_LENGTH;
+
+    /* Start of data */
+    ret = rpc_unicode_string_data(p, pend - p, &di.s4u2proxy_target, &used);
+    check_ret_p(ret, p , used);
+
+    trans_size  = load_32_le(p);
+    p += 4;
+    if (trans_size != di.trans_size ||
+        pac_di.length < p - (unsigned char *)pac_di.data + trans_size * 8)
+        return ERANGE;
+
+    di.s4u_trans = k5alloc(di.trans_size * sizeof(krb5_data), &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    di.s4u_trans_max = k5alloc(di.trans_size * sizeof(unsigned int), &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    for (i = 0; i < di.trans_size; i++) {
+        ret = rpc_unicode_string_len_ref(p, pend - p, &di.s4u_trans[i]);
+        check_ret_p(ret, p , CV_STR_LEN_REF);
+    }
+
+    for (i = 0; i < di.trans_size; i++) {
+        ret = rpc_unicode_string_data(p, pend - p, &di.s4u_trans[i], &used);
+        check_ret_p(ret, p , used);
+    }
+
+    *deleg_info_out = di;
+
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_upn_dns_info(krb5_context context, krb5_pac pac,
+                             struct upn_dns_info *upn_info_out)
+{
+    krb5_error_code ret;
+    krb5_data pac_ui;
+    unsigned char *p, *p0;
+    struct upn_dns_info ui;
+    krb5_ui_2 upn_length;
+    krb5_ui_2 upn_offset;
+    krb5_ui_2 dns_domain_name_length;
+    krb5_ui_2 dns_domain_name_offset;
+
+    ret = k5_pac_locate_buffer(context, pac, KRB5_PAC_UPN_DNS_INFO, &pac_ui);
+    if (ret != 0)
+        return ret;
+
+    if (pac_ui.length < PAC_UPN_DNS_INFO_LENGTH)
+        return ERANGE;
+
+    p0 = p = (unsigned char *)pac_ui.data;
+
+    upn_length = load_16_le(p);
+    p += 2;
+    upn_offset = load_16_le(p);
+    p += 2;
+    dns_domain_name_length = load_16_le(p);
+    p += 2;
+    dns_domain_name_offset = load_16_le(p);
+    p += 2;
+
+    ui.flags = load_32_le(p);
+
+    if (pac_ui.length < upn_offset + upn_length ||
+        pac_ui.length < dns_domain_name_offset + dns_domain_name_length)
+        return ERANGE;
+
+    ret = k5_utf16le_to_utf8(p0 + upn_offset, upn_length, &ui.upn.data);
+    if (ret != 0)
+        return ret;
+    p += upn_length;
+
+    ret = k5_utf16le_to_utf8(p0 + dns_domain_name_offset,
+                             dns_domain_name_length, &ui.dns_domain_name.data);
+    if (ret != 0)
+        return ret;
+    p += dns_domain_name_length;
+
+    ui.upn.length = upn_length / 2;
+    ui.dns_domain_name.length = dns_domain_name_length / 2;
+    *upn_info_out = ui;
+
+    return 0;
+}
+
 /*
  * PAC auth data attribute backend
  */
