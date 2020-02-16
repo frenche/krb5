@@ -1205,6 +1205,476 @@ krb5_pac_get_upn_dns_info(krb5_context context, krb5_pac pac,
     return 0;
 }
 
+
+#define GRP_ATTR_LEN 8
+#define SID_REF_AND_ATTR 8
+static char rpc_header[] = {0x01, 0x10, 0x08, 0x00, 0xcc, 0xcc, 0xcc, 0xcc};
+
+static inline unsigned int
+sid_len(struct rpc_sid *sid)
+{
+    return 12 + sid->sub_authority_count * 4;
+}
+
+static unsigned int
+cv_str_len(unsigned int length)
+{
+    unsigned int len;
+
+    len = CV_STR_HEADER + length * 2;
+    if (length != 0 && length % 2)
+        len += 2;
+
+    return len;
+}
+
+static void
+marshal_refereant_id(unsigned char *p, unsigned int *ref_id)
+{
+    if (ref_id != NULL) {
+        store_32_le(*ref_id, p);
+        *ref_id += 4;
+    } else {
+        store_32_le(0, p);
+    }
+}
+
+static void
+marshal_rpc_unicode_string_len_ref(unsigned char *p,
+                                   struct rpc_unicode_string str,
+                                   krb5_ui_4 *ref_id)
+{
+    store_16_le(str.length * 2, p);
+    p += 2;
+
+    store_16_le(str.max_length * 2, p);
+    p += 2;
+
+    marshal_refereant_id(p , ref_id);
+}
+
+static krb5_error_code
+marshal_rpc_unicode_string_data(unsigned char *p,
+                                struct rpc_unicode_string str,
+                                unsigned int *used)
+{
+    krb5_error_code ret;
+    unsigned char *utf16;
+    size_t utf16_len;
+
+    store_32_le(str.max_length, p);
+    p += 4;
+    store_32_le(0, p);
+    p += 4;
+    store_32_le(str.length, p);
+    p += 4;
+
+    ret = k5_utf8_to_utf16le(str.data, &utf16, &utf16_len);
+    if (ret != 0)
+        return ret;
+    if (utf16_len != str.length * 2)
+        return ERANGE;
+
+    memcpy(p, utf16, utf16_len);
+    if (str.length % 2)
+        utf16_len += 2;
+
+    *used = CV_STR_HEADER + utf16_len;
+    return 0;
+}
+
+static krb5_error_code
+marshal_group_array(unsigned char *p, struct group_membership *group_ids,
+                    unsigned int group_count, unsigned int *used)
+{
+    unsigned int i;
+
+    if (group_count == 0)
+        return 0;
+
+    store_32_le(group_count, p);
+    p += 4;
+
+    for (i = 0; i < group_count; i++) {
+        store_32_le(group_ids[i].relative_id, p);
+        p += 4;
+        store_32_le(group_ids[i].attributes, p);
+        p += 4;
+    }
+
+    *used = 4 + group_count * 8;
+    return 0;
+}
+
+static krb5_error_code
+marshal_rpc_sid(unsigned char *p, struct rpc_sid sid, unsigned int *used)
+{
+    unsigned int i;
+    unsigned char *p0 = p;
+
+    store_32_le(sid.sub_authority_count, p);
+    p += 4;
+
+    *p = 1;
+    p += 1;
+    *p = sid.sub_authority_count;
+    p += 1;
+
+    memcpy(p, sid.identifier_authority, 6);
+    p += 6;
+
+    for (i = 0; i < sid.sub_authority_count; i++) {
+        store_32_le(sid.sub_authority[i], p);
+        p += 4;
+    }
+
+    *used = p - p0;
+    return 0;
+}
+
+static krb5_error_code
+marshal_sid_and_attribute_array(unsigned char *p,
+                                struct sid_and_attributes *sids_and_attr,
+                                unsigned int sid_count, krb5_ui_4 ref_id,
+                                unsigned int *used)
+{
+    krb5_error_code ret;
+    unsigned int i, used2;
+    unsigned char *p0 = p;
+
+    if (sid_count == 0)
+        return 0;
+
+    store_32_le(sid_count, p);
+    p += 4;
+
+    for (i = 0; i < sid_count; i++) {
+        marshal_refereant_id(p , &ref_id);
+        p += 4;
+        store_32_le(sids_and_attr[i].attributes, p);
+        p += 4;
+    }
+
+    for (i = 0; i < sid_count; i++) {
+        ret = marshal_rpc_sid(p, *sids_and_attr[i].sid, &used2);
+        if (ret != 0)
+            return ret;
+        p += used2;
+    }
+
+    *used = p - p0;
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_marshal_pac_logon_info(krb5_context context,
+                            struct kerb_validation_info li, krb5_data *data)
+{
+    krb5_error_code ret;
+    unsigned char *p;
+    unsigned int i, len, used;
+    krb5_ui_4 ref_id, sids_and_attr_ref_id;
+
+    len = PAC_LOGON_INFO_LENGTH;
+
+    len += cv_str_len(li.effective_name.length);
+    len += cv_str_len(li.full_name.length);
+    len += cv_str_len(li.logon_script.length);
+    len += cv_str_len(li.profile_path.length);
+    len += cv_str_len(li.home_directory.length);
+    len += cv_str_len(li.home_directory_drive.length);
+
+    if (li.group_count != 0)
+        len += 4 + li.group_count * GRP_ATTR_LEN;
+
+    len += cv_str_len(li.logon_server.length);
+    len += cv_str_len(li.logon_domain_name.length);
+
+    if (li.logon_domain_id != NULL)
+        len += sid_len(li.logon_domain_id);
+
+    if (li.sid_count != 0) {
+        len += 4;
+        for (i = 0; i < li.sid_count; i++)
+            len += SID_REF_AND_ATTR + sid_len(li.extra_sids[i].sid);
+    }
+
+    if (li.resource_group_domain_sid != NULL)
+        len += sid_len(li.resource_group_domain_sid);
+
+    if (li.resource_group_count != 0)
+        len += 4 + li.resource_group_count * GRP_ATTR_LEN;
+
+    if (len % 8)
+        len += 8 - (len % 8);
+
+    data->data = k5alloc(len, &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    data->length = len;
+
+    p = (unsigned char *)data->data;
+    ref_id = 0x020000;
+
+    memcpy(p, rpc_header, 8);
+    p += 8;
+    store_64_le(len - RPC_HEADERS, p);
+    p += 8;
+    marshal_refereant_id(p, &ref_id);
+    p += 4;
+
+    store_64_le(li.logon_time, p);
+    p += 8;
+    store_64_le(li.logoff_time, p);
+    p += 8;
+    store_64_le(li.kickoff_time, p);
+    p += 8;
+    store_64_le(li.pass_last_set, p);
+    p += 8;
+    store_64_le(li.pass_can_change, p);
+    p += 8;
+    store_64_le(li.pass_must_change, p);
+    p += 8;
+
+    marshal_rpc_unicode_string_len_ref(p, li.effective_name, &ref_id);
+    p += CV_STR_LEN_REF;
+    marshal_rpc_unicode_string_len_ref(p, li.full_name, &ref_id);
+    p += CV_STR_LEN_REF;
+    marshal_rpc_unicode_string_len_ref(p, li.logon_script, &ref_id);
+    p += CV_STR_LEN_REF;
+    marshal_rpc_unicode_string_len_ref(p, li.profile_path, &ref_id);
+    p += CV_STR_LEN_REF;
+    marshal_rpc_unicode_string_len_ref(p, li.home_directory, &ref_id);
+    p += CV_STR_LEN_REF;
+    marshal_rpc_unicode_string_len_ref(p, li.home_directory_drive, &ref_id);
+    p += CV_STR_LEN_REF;
+
+    store_16_le(li.logon_count, p);
+    p += 2;
+    store_16_le(li.bad_pass_count, p);
+    p += 2;
+    store_32_le(li.user_id, p);
+    p += 4;
+    store_32_le(li.primary_group_id, p);
+    p += 4;
+    store_32_le(li.group_count, p);
+    p += 4;
+    marshal_refereant_id(p, li.group_count != 0 ? &ref_id : NULL);
+    p += 4;
+
+    store_32_le(li.user_flags, p);
+    p += 4;
+    memcpy(p, li.user_session_key, 16);
+    p += 16;
+
+    marshal_rpc_unicode_string_len_ref(p, li.logon_server, &ref_id);
+    p += CV_STR_LEN_REF;
+    marshal_rpc_unicode_string_len_ref(p, li.logon_domain_name, &ref_id);
+    p += CV_STR_LEN_REF;
+
+    marshal_refereant_id(p, li.logon_domain_id != NULL ? &ref_id : NULL);
+    p += 4;
+
+    p += 2 * 4;
+    store_32_le(li.user_account_control, p);
+    p += 8 * 4;
+
+    store_32_le(li.sid_count, p);
+    p += 4;
+
+    marshal_refereant_id(p, li.sid_count != 0 ? &ref_id : NULL);
+    p += 4;
+
+    sids_and_attr_ref_id = ref_id;
+    ref_id += li.sid_count * 4;
+
+    marshal_refereant_id(p, li.resource_group_domain_sid != NULL ? &ref_id : NULL);
+    p += 4;
+
+    store_32_le(li.resource_group_count, p);
+    p += 4;
+
+    marshal_refereant_id(p, li.resource_group_count != 0 ? &ref_id : NULL);
+    p += 4;
+
+    /* data */
+    ret = marshal_rpc_unicode_string_data(p, li.effective_name, &used);
+    check_ret_p(ret, p , used);
+    ret = marshal_rpc_unicode_string_data(p, li.full_name, &used);
+    check_ret_p(ret, p , used);
+    ret = marshal_rpc_unicode_string_data(p, li.logon_script, &used);
+    check_ret_p(ret, p , used);
+    ret = marshal_rpc_unicode_string_data(p, li.profile_path, &used);
+    check_ret_p(ret, p , used);
+    ret = marshal_rpc_unicode_string_data(p, li.home_directory, &used);
+    check_ret_p(ret, p , used);
+    ret = marshal_rpc_unicode_string_data(p, li.home_directory_drive, &used);
+    check_ret_p(ret, p , used);
+
+    ret = marshal_group_array(p, li.group_ids, li.group_count, &used);
+    if (ret != 0)
+        return ret;
+    p += used;
+
+    ret = marshal_rpc_unicode_string_data(p, li.logon_server, &used);
+    check_ret_p(ret, p , used);
+    ret = marshal_rpc_unicode_string_data(p, li.logon_domain_name, &used);
+    check_ret_p(ret, p , used);
+
+    if (li.logon_domain_id != NULL) {
+        ret = marshal_rpc_sid(p, *li.logon_domain_id, &used);
+        if (ret != 0)
+            return ret;
+        p += used;
+    }
+
+    ret = marshal_sid_and_attribute_array(p, li.extra_sids, li.sid_count, sids_and_attr_ref_id, &used);
+    if (ret != 0)
+        return ret;
+    p += used;
+
+    if (li.resource_group_domain_sid != NULL) {
+        ret = marshal_rpc_sid(p, *li.resource_group_domain_sid, &used);
+        if (ret != 0)
+            return ret;
+        p += used;
+    }
+
+    ret = marshal_group_array(p, li.resource_group_ids, li.resource_group_count, &used);
+    if (ret != 0)
+        return ret;
+    p += used;
+
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_marshal_pac_delegation_info(krb5_context context,
+                                 struct delegation_info di, krb5_data *data)
+{
+    krb5_error_code ret;
+    unsigned char *p;
+    unsigned int i, len, used;
+    krb5_ui_4 ref_id;
+
+    len = PAC_DELEGATION_INFO_LENGTH;
+
+    len += cv_str_len(di.s4u2proxy_target.length);
+
+    len += CV_STR_LEN_REF * di.trans_size;
+    len += 4; /* count */
+    for (i = 0; i < di.trans_size; i++) {
+        len += cv_str_len(di.s4u_trans[i].length);
+    }
+
+    if (len % 8)
+        len += 8 - (len % 8);
+
+    data->data = k5alloc(len, &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    p = (unsigned char *)data->data;
+    ref_id = 0x020000;
+
+    memcpy(p, rpc_header, 8);
+    p += 8;
+    store_64_le(len - RPC_HEADERS, p);
+    p += 8;
+    store_32_le(ref_id, p);
+    p += 4;
+    ref_id += 4;
+
+    marshal_rpc_unicode_string_len_ref(p, di.s4u2proxy_target, &ref_id);
+    p += CV_STR_LEN_REF;
+
+    store_32_le(di.trans_size, p);
+    p += 4;
+
+    store_32_le(ref_id, p);
+    p += 4;
+    ref_id += 4;
+
+    ret = marshal_rpc_unicode_string_data(p, di.s4u2proxy_target, &used);
+    check_ret_p(ret, p , used);
+
+    store_32_le(di.trans_size, p);
+    p += 4;
+
+    for (i = 0; i < di.trans_size; i++) {
+        marshal_rpc_unicode_string_len_ref(p, di.s4u_trans[i], &ref_id);
+        p += CV_STR_LEN_REF;
+    }
+
+    for (i = 0; i < di.trans_size; i++) {
+        ret = marshal_rpc_unicode_string_data(p, di.s4u_trans[i], &used);
+        check_ret_p(ret, p , used);
+    }
+
+    data->length = len;
+
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_marshal_pac_upn_dns_info(krb5_context context,
+                              struct upn_dns_info upn_info, krb5_data *data)
+{
+    krb5_error_code ret;
+    unsigned char *p, *utf16;
+    unsigned int len, upn_length, upn_offset, dns_length, dns_offset, upn_pad, dns_pad;
+    size_t utf16_len;
+
+    upn_length = upn_info.upn.length * 2;
+    upn_offset = PAC_UPN_DNS_INFO_LENGTH;
+    upn_pad = (8 - (upn_length % 8)) % 8;
+    dns_length = upn_info.dns_domain_name.length * 2;
+    dns_offset = upn_offset + upn_length + upn_pad;
+    dns_pad = (8 - (dns_length % 8)) % 8;
+
+    len = dns_offset + dns_length + dns_pad;
+
+    data->data = k5alloc(len, &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    p = (unsigned char *)data->data;
+
+    store_16_le(upn_length, p);
+    p += 2;
+    store_16_le(upn_offset, p);
+    p += 2;
+    store_16_le(dns_length, p);
+    p += 2;
+    store_16_le(dns_offset, p);
+    p += 2;
+
+    store_32_le(upn_info.flags, p);
+    p += 8;
+
+    ret = k5_utf8_to_utf16le(upn_info.upn.data, &utf16, &utf16_len);
+    if (ret != 0)
+        return ret;
+    if (utf16_len != upn_length)
+        return ERANGE;
+
+    memcpy(p, utf16, utf16_len);
+    p += upn_length + upn_pad;
+
+    ret = k5_utf8_to_utf16le(upn_info.dns_domain_name.data, &utf16,
+                             &utf16_len);
+    if (ret != 0)
+        return ret;
+    if (utf16_len != dns_length)
+        return ERANGE;
+
+    memcpy(p, utf16, utf16_len);
+    data->length = len;
+
+    return 0;
+}
+
 /*
  * PAC auth data attribute backend
  */

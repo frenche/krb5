@@ -8462,6 +8462,10 @@ krb5_error_code KRB5_CALLCONV
 krb5_pac_get_logon_info(krb5_context context, krb5_pac pac,
                         struct kerb_validation_info *logon_info);
 
+krb5_error_code KRB5_CALLCONV
+krb5_marshal_pac_logon_info(krb5_context context,
+                            struct kerb_validation_info li, krb5_data *data);
+
 struct delegation_info {
     struct rpc_unicode_string s4u2proxy_target;
     krb5_ui_4 trans_size;
@@ -8479,6 +8483,10 @@ krb5_error_code KRB5_CALLCONV
 krb5_pac_get_delegation_info(krb5_context context, krb5_pac pac,
                              struct delegation_info *deleg_info);
 
+krb5_error_code KRB5_CALLCONV
+krb5_marshal_pac_delegation_info(krb5_context context,
+                                 struct delegation_info di, krb5_data *data);
+
 struct upn_dns_info {
     krb5_data upn;
     krb5_data dns_domain_name;
@@ -8492,6 +8500,9 @@ krb5_error_code KRB5_CALLCONV
 krb5_pac_get_upn_dns_info(krb5_context context, krb5_pac pac,
                           struct upn_dns_info *dns_info);
 
+krb5_error_code KRB5_CALLCONV
+krb5_marshal_pac_upn_dns_info(krb5_context context,
+                              struct upn_dns_info upn_info, krb5_data *data);
 /**
  * Allow the appplication to override the profile's allow_weak_crypto setting.
  *

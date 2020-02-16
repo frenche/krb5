@@ -60,13 +60,22 @@ err(krb5_context ctx, krb5_error_code code, const char *fmt, ...)
     exit(1);
 }
 
+static krb5_error_code
+check_marshalled(krb5_data data, krb5_data marshalled)
+{
+    if (marshalled.length < data.length)
+        return ERANGE;
+
+    return memcmp(marshalled.data, data.data, data.length);
+}
+
 static void
 check_pac(krb5_context context, const struct pac_and_info *p,
           const krb5_keyblock *server_key, const krb5_keyblock *kdc_key)
 {
     krb5_error_code ret;
     krb5_principal princ;
-    krb5_data data;
+    krb5_data data, marshalled;
     krb5_pac pac;
 
     if (p->is_enterprise) {
@@ -141,7 +150,15 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 if (ret)
                     err(context, ret, "krb5_pac_get_logon_info");
 
+                ret = krb5_marshal_pac_logon_info(context, logon_info, &marshalled);
+                if (ret)
+                    err(context, ret, "krb5_marshal_pac_logon_info");
+
                 //free_pac_logon_info(context, logon_info);
+
+                ret = check_marshalled(data, marshalled);
+                if (ret)
+                    err(context, ret, "marshal mismatch");
 
                 if (p->type_length != data.length) {
                     err(context, 0, "[pac: %s] type 1 have wrong length: %lu",
@@ -154,7 +171,15 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 if (ret)
                     err(context, ret, "krb5_pac_get_delegation_info");
 
+                ret = krb5_marshal_pac_delegation_info(context, deleg_info, &marshalled);
+                if (ret)
+                    err(context, ret, "krb5_marshal_pac_delegation_info");
+
                 //free_pac_delegation_info(context, deleg_info);
+
+                ret = check_marshalled(data, marshalled);
+                if (ret)
+                    err(context, ret, "Marshalled length too short");
 
             } else if (list[i] == 12) {
                 struct upn_dns_info upn_info;
@@ -163,12 +188,22 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 if (ret)
                     err(context, ret, "krb5_pac_get_upn_dns_info");
 
+                ret = krb5_marshal_pac_upn_dns_info(context, upn_info, &marshalled);
+                if (ret)
+                    err(context, ret, "krb5_marshal_pac_upn_dns_info");
+
                 //free_pac_upn_dns_info(context, upn_info);
+
+                ret = check_marshalled(data, marshalled);
+                if (ret)
+                    err(context, ret, "Marshalled length too short");
 
             } else {
                 err(context, 0, "[pac: %s] unknown type %lu",
                     p->pac_name, (unsigned long)list[i]);
             }
+
+            krb5_free_data_contents(context, &marshalled);
 
             ret = krb5_pac_add_buffer(context, pac2, list[i], &data);
             if (ret)
