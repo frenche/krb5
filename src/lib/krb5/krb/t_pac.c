@@ -60,13 +60,166 @@ err(krb5_context ctx, krb5_error_code code, const char *fmt, ...)
     exit(1);
 }
 
+#include <ctype.h>
+#include <stdio.h>
+
+static void
+hexdump(void *ptr, int buflen) {
+  unsigned char *buf = (unsigned char*)ptr;
+  int i, j;
+  for (i=0; i<buflen; i+=16) {
+    printf("%06x: ", i);
+    for (j=0; j<16; j++)
+      if (i+j < buflen)
+        printf("%02x ", buf[i+j]);
+      else
+        printf("   ");
+    printf(" ");
+    for (j=0; j<16; j++)
+      if (i+j < buflen)
+        printf("%c", isprint(buf[i+j]) ? buf[i+j] : '.');
+    printf("\n");
+  }
+}
+
+
+static void
+print_chars(char *data, unsigned int length)
+{
+    unsigned int j;
+
+    for (j = 0 ; j < length; j++)
+        printf("%c", data[j]);
+}
+
+static void
+print_data(krb5_data data)
+{
+    print_chars(data.data, data.length);
+}
+
+static void
+print_rpc_unicode_string(struct rpc_unicode_string data)
+{
+    print_chars(data.data, data.length);
+}
+
+
+static void
+deleg_str_stats(struct delegation_info info)
+{
+    unsigned int j;
+
+    printf("len\tmax_len\tstr\n");
+    printf("%u\t%u\t", info.s4u2proxy_target.length, info.s4u2proxy_target.max_length);
+    print_rpc_unicode_string(info.s4u2proxy_target);
+    printf("\n");
+    for (j = 0 ; j < info.trans_size; j++) {
+        printf("%u\t%u\t", info.s4u_trans[j].length, info.s4u_trans[j].max_length);
+        print_rpc_unicode_string(info.s4u_trans[j]);
+        printf("\n");
+    }
+}
+
+static void
+logon_str_stats(struct kerb_validation_info info)
+{
+    printf("len\tmax_len\tstr\n");
+    printf("%u\t%u\t", info.effective_name.length, info.effective_name.max_length);
+    print_rpc_unicode_string(info.effective_name);
+    printf("\n%u\t%u\t", info.full_name.length ,info.full_name.max_length);
+    print_rpc_unicode_string(info.full_name);
+    printf("\n%u\t%u\t", info.logon_script.length ,info.logon_script.max_length);
+    print_rpc_unicode_string(info.logon_script);
+    printf("\n%u\t%u\t", info.profile_path.length ,info.profile_path.max_length);
+    print_rpc_unicode_string(info.profile_path);
+    printf("\n%u\t%u\t", info.home_directory.length ,info.home_directory.max_length);
+    print_rpc_unicode_string(info.home_directory);
+    printf("\n%u\t%u\t", info.home_directory_drive.length ,info.home_directory_drive.max_length);
+    print_rpc_unicode_string(info.home_directory_drive);
+    printf("\n%u\t%u\t", info.logon_server.length ,info.logon_server.max_length);
+    print_rpc_unicode_string(info.logon_server);
+    printf("\n%u\t%u\t", info.logon_domain_name.length ,info.logon_domain_name.max_length);
+    print_rpc_unicode_string(info.logon_domain_name);
+    printf("\n");
+}
+
+static void
+print_logon_data(struct kerb_validation_info logon_info)
+{
+    unsigned int j;
+
+    printf("name: ");
+    print_rpc_unicode_string(logon_info.effective_name);
+    printf("\tfull name: ");
+    print_rpc_unicode_string(logon_info.full_name);
+    printf("\tuser id: %u\tprimary group id: %u\n",
+           logon_info.user_id, logon_info.primary_group_id);
+    printf("group membership array:");
+    for (j = 0 ; j < logon_info.group_count; j++) {
+        printf(" %u-%u", logon_info.group_ids[j].relative_id, logon_info.group_ids[j].attributes);
+    }
+    printf("\ngroup/sids/resource count: %u %u %u\n",logon_info.group_count, logon_info.sid_count, logon_info.resource_group_count);
+ /*   printf("logon domain name: ");
+    print_rpc_unicode_string(logon_info.logon_domain_name);
+    printf("\tlogon domain id: %c", logon_info.logon_domain_id->identifier_authority[6]);
+    for (j = 0 ; j < logon_info.logon_domain_id->sub_authority_count; j++) {
+        printf("-%u", logon_info.logon_domain_id->sub_authority[j]);
+    }
+    if (logon_info.resource_group_domain_sid != NULL) {
+        printf("\tres group domain id: %c", logon_info.resource_group_domain_sid->identifier_authority[6]);
+        for (j = 0 ; j < logon_info.resource_group_domain_sid->sub_authority_count; j++)
+            printf("-%u", logon_info.resource_group_domain_sid->sub_authority[j]);
+    }
+*/    if (logon_info.resource_group_count != 0) {
+        printf("resource group membership array:");
+        for (j = 0 ; j < logon_info.resource_group_count; j++)
+            printf(" %u-%u", logon_info.resource_group_ids[j].relative_id, logon_info.resource_group_ids[j].attributes);
+        printf("\n");
+    }
+}
+
+static void
+print_delegation_data(struct delegation_info deleg_info)
+{
+    krb5_ui_4 j;
+
+    printf("proxy target ");
+    print_rpc_unicode_string(deleg_info.s4u2proxy_target);
+    printf(" delegated by:");
+    for (j = 0 ; j < deleg_info.trans_size; j++) {
+        printf(" ");
+        print_rpc_unicode_string(deleg_info.s4u_trans[j]);
+    }
+    printf("\n");
+}
+
+static void
+print_upn_data(struct upn_dns_info upn_info)
+{
+    printf("upn: ");
+    print_data(upn_info.upn);
+    printf("\tdns_domain_name: ");
+    print_data(upn_info.dns_domain_name);
+    printf("\tflags: %u\n", upn_info.flags);
+}
+
 static krb5_error_code
 check_marshalled(krb5_data data, krb5_data marshalled)
 {
-    if (marshalled.length < data.length)
-        return ERANGE;
+    krb5_error_code ret;
 
-    return memcmp(marshalled.data, data.data, data.length);
+    if (marshalled.length < data.length) {
+        printf("marshalled length (%u) too short\n", marshalled.length);
+        hexdump(marshalled.data, marshalled.length);
+        return ERANGE;
+    }
+
+    ret = memcmp(marshalled.data, data.data, data.length);
+    if (ret)
+        hexdump(marshalled.data, marshalled.length);
+
+    return ret;
 }
 
 static void
@@ -146,9 +299,15 @@ check_pac(krb5_context context, const struct pac_and_info *p,
             if (list[i] == 1) {
                 struct kerb_validation_info logon_info;
 
+                printf("FOUND logon info (length: %lu)\n", (unsigned long)data.length);
+                hexdump(data.data, data.length);
+
                 ret = krb5_pac_get_logon_info(context, pac, &logon_info);
                 if (ret)
                     err(context, ret, "krb5_pac_get_logon_info");
+
+                print_logon_data(logon_info);
+                //logon_str_stats(logon_info);
 
                 ret = krb5_marshal_pac_logon_info(context, logon_info, &marshalled);
                 if (ret)
@@ -167,9 +326,15 @@ check_pac(krb5_context context, const struct pac_and_info *p,
             } else if (list[i] == 11) {
                 struct delegation_info deleg_info;
 
+                printf("FOUND delegation info (length: %lu)\n", (unsigned long)data.length);
+                hexdump(data.data, data.length);
+
                 ret = krb5_pac_get_delegation_info(context, pac, &deleg_info);
                 if (ret)
                     err(context, ret, "krb5_pac_get_delegation_info");
+
+                print_delegation_data(deleg_info);
+                deleg_str_stats(deleg_info);
 
                 ret = krb5_marshal_pac_delegation_info(context, deleg_info, &marshalled);
                 if (ret)
@@ -184,9 +349,14 @@ check_pac(krb5_context context, const struct pac_and_info *p,
             } else if (list[i] == 12) {
                 struct upn_dns_info upn_info;
 
+                printf("FOUND upn_dns info (length: %lu)\n", (unsigned long)data.length);
+                hexdump(data.data, data.length);
+
                 ret = krb5_pac_get_upn_dns_info(context, pac, &upn_info);
                 if (ret)
                     err(context, ret, "krb5_pac_get_upn_dns_info");
+
+                print_upn_data(upn_info);
 
                 ret = krb5_marshal_pac_upn_dns_info(context, upn_info, &marshalled);
                 if (ret)
