@@ -110,6 +110,16 @@ import_name(const char *str)
     return name;
 }
 
+uint8_t mydata[] = {
+    0x74, 0x6c, 0x73, 0x2d, 0x73, 0x65, 0x72, 0x76,
+    0x65, 0x72, 0x2d, 0x65, 0x6e, 0x64, 0x2d, 0x70,
+    0x6f, 0x69, 0x6e, 0x74, 0x3a, 0xdc, 0xbb, 0xd4,
+    0xeb, 0x42, 0x2a, 0x01, 0x99, 0x79, 0xb2, 0x88,
+    0x7a, 0x04, 0xc2, 0xba, 0x4f, 0x78, 0xa3, 0xcd,
+    0x6b, 0xf1, 0xf8, 0x7d, 0x17, 0xa4, 0x56, 0xdc,
+    0x41, 0xb2, 0xd9, 0x54, 0x9b
+};
+
 void
 establish_contexts(gss_OID imech, gss_cred_id_t icred, gss_cred_id_t acred,
                    gss_name_t tname, OM_uint32 flags, gss_ctx_id_t *ictx,
@@ -119,6 +129,10 @@ establish_contexts(gss_OID imech, gss_cred_id_t icred, gss_cred_id_t acred,
     OM_uint32 minor, imaj, amaj;
     gss_buffer_desc itok, atok;
 
+    struct gss_channel_bindings_struct cb = {0};
+    cb.application_data.length = sizeof(mydata);
+    cb.application_data.value = mydata;
+
     *ictx = *actx = GSS_C_NO_CONTEXT;
     imaj = amaj = GSS_S_CONTINUE_NEEDED;
     itok.value = atok.value = NULL;
@@ -127,7 +141,7 @@ establish_contexts(gss_OID imech, gss_cred_id_t icred, gss_cred_id_t acred,
         (void)gss_release_buffer(&minor, &itok);
         imaj = gss_init_sec_context(&minor, icred, ictx, tname, imech, flags,
                                     GSS_C_INDEFINITE,
-                                    GSS_C_NO_CHANNEL_BINDINGS, &atok, NULL,
+                                    &cb, &atok, NULL,
                                     &itok, NULL, NULL);
         check_gsserr("gss_init_sec_context", imaj, minor);
         if (amaj == GSS_S_COMPLETE)
