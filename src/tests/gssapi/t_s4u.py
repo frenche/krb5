@@ -375,6 +375,9 @@ ra.run(['./t_s4u', 'p:' + ra.user_princ, 'h:service@rb.c'], env=domain_conf)
 ra.run(['./t_s4u', 'p:' + 'sensitive@A', 'h:service@rb.c'], expected_code=1)
 ra.run(['./t_s4u', 'p:' + rb.user_princ, 'h:service@rb.c'])
 
+mark('RBCD get attribute')
+ra.run(['klist'])
+
 ra.stop()
 rb.stop()
 rc.stop()
