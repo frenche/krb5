@@ -8460,11 +8460,15 @@ struct kerb_validation_info {
  */
 krb5_error_code KRB5_CALLCONV
 krb5_pac_get_logon_info(krb5_context context, krb5_pac pac,
-                        struct kerb_validation_info *logon_info);
+                        struct kerb_validation_info **logon_info);
 
 krb5_error_code KRB5_CALLCONV
-krb5_marshal_pac_logon_info(krb5_context context,
-                            struct kerb_validation_info li, krb5_data *data);
+krb5_pac_marshal_logon_info(krb5_context context,
+                            struct kerb_validation_info *li, krb5_data *data);
+
+void KRB5_CALLCONV
+krb5_pac_free_logon_info(krb5_context context,
+                         struct kerb_validation_info *li);
 
 struct delegation_info {
     struct rpc_unicode_string s4u2proxy_target;
@@ -8481,11 +8485,15 @@ struct delegation_info {
  */
 krb5_error_code KRB5_CALLCONV
 krb5_pac_get_delegation_info(krb5_context context, krb5_pac pac,
-                             struct delegation_info *deleg_info);
+                             struct delegation_info **deleg_info);
 
 krb5_error_code KRB5_CALLCONV
-krb5_marshal_pac_delegation_info(krb5_context context,
-                                 struct delegation_info di, krb5_data *data);
+krb5_pac_marshal_delegation_info(krb5_context context,
+                                 struct delegation_info *di, krb5_data *data);
+
+void KRB5_CALLCONV
+krb5_pac_free_delegation_info(krb5_context context,
+                              struct delegation_info *di);
 
 struct upn_dns_info {
     krb5_data upn;
@@ -8498,11 +8506,16 @@ struct upn_dns_info {
  */
 krb5_error_code KRB5_CALLCONV
 krb5_pac_get_upn_dns_info(krb5_context context, krb5_pac pac,
-                          struct upn_dns_info *dns_info);
+                          struct upn_dns_info **dns_info);
 
 krb5_error_code KRB5_CALLCONV
-krb5_marshal_pac_upn_dns_info(krb5_context context,
-                              struct upn_dns_info upn_info, krb5_data *data);
+krb5_pac_marshal_upn_dns_info(krb5_context context,
+                              struct upn_dns_info *upn_info, krb5_data *data);
+
+void KRB5_CALLCONV
+krb5_pac_free_upn_dns_info(krb5_context context,
+                           struct upn_dns_info *upn_info);
+
 /**
  * Allow the appplication to override the profile's allow_weak_crypto setting.
  *

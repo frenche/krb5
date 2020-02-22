@@ -297,7 +297,7 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 err(context, ret, "[pac: %s] krb5_pac_get_buffer", p->pac_name);
 
             if (list[i] == 1) {
-                struct kerb_validation_info logon_info;
+                struct kerb_validation_info *logon_info = NULL;
 
                 printf("FOUND logon info (length: %lu)\n", (unsigned long)data.length);
                 hexdump(data.data, data.length);
@@ -306,14 +306,14 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 if (ret)
                     err(context, ret, "krb5_pac_get_logon_info");
 
-                print_logon_data(logon_info);
-                //logon_str_stats(logon_info);
+                print_logon_data(*logon_info);
+                logon_str_stats(*logon_info);
 
-                ret = krb5_marshal_pac_logon_info(context, logon_info, &marshalled);
+                ret = krb5_pac_marshal_logon_info(context, logon_info, &marshalled);
                 if (ret)
-                    err(context, ret, "krb5_marshal_pac_logon_info");
+                    err(context, ret, "krb5_pac_marshal_logon_info");
 
-                //free_pac_logon_info(context, logon_info);
+                krb5_pac_free_logon_info(context, logon_info);
 
                 ret = check_marshalled(data, marshalled);
                 if (ret)
@@ -324,7 +324,7 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                         p->pac_name, (unsigned long)data.length);
                 }
             } else if (list[i] == 11) {
-                struct delegation_info deleg_info;
+                struct delegation_info *deleg_info = NULL;
 
                 printf("FOUND delegation info (length: %lu)\n", (unsigned long)data.length);
                 hexdump(data.data, data.length);
@@ -333,21 +333,21 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 if (ret)
                     err(context, ret, "krb5_pac_get_delegation_info");
 
-                print_delegation_data(deleg_info);
-                deleg_str_stats(deleg_info);
+                print_delegation_data(*deleg_info);
+                deleg_str_stats(*deleg_info);
 
-                ret = krb5_marshal_pac_delegation_info(context, deleg_info, &marshalled);
+                ret = krb5_pac_marshal_delegation_info(context, deleg_info, &marshalled);
                 if (ret)
-                    err(context, ret, "krb5_marshal_pac_delegation_info");
+                    err(context, ret, "krb5_pac_marshal_delegation_info");
 
-                //free_pac_delegation_info(context, deleg_info);
+                krb5_pac_free_delegation_info(context, deleg_info);
 
                 ret = check_marshalled(data, marshalled);
                 if (ret)
                     err(context, ret, "Marshalled length too short");
 
             } else if (list[i] == 12) {
-                struct upn_dns_info upn_info;
+                struct upn_dns_info *upn_info = NULL;
 
                 printf("FOUND upn_dns info (length: %lu)\n", (unsigned long)data.length);
                 hexdump(data.data, data.length);
@@ -356,13 +356,13 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                 if (ret)
                     err(context, ret, "krb5_pac_get_upn_dns_info");
 
-                print_upn_data(upn_info);
+                print_upn_data(*upn_info);
 
-                ret = krb5_marshal_pac_upn_dns_info(context, upn_info, &marshalled);
+                ret = krb5_pac_marshal_upn_dns_info(context, upn_info, &marshalled);
                 if (ret)
-                    err(context, ret, "krb5_marshal_pac_upn_dns_info");
+                    err(context, ret, "krb5_pac_marshal_upn_dns_info");
 
-                //free_pac_upn_dns_info(context, upn_info);
+                krb5_pac_free_upn_dns_info(context, upn_info);
 
                 ret = check_marshalled(data, marshalled);
                 if (ret)
