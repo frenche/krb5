@@ -253,6 +253,31 @@ cleanup:
     return retval;
 }
 
+#define KERB_AP_OPTIONS_CBT 0x00004000
+#define AD_AP_OPTIONS 143
+
+static void
+add_ad_ap_options(krb5_context context, krb5_authdata **out)
+{
+    krb5_authdata ad, *list[2], **ifrel;
+
+    uint32_t ad_ap_options = KERB_AP_OPTIONS_CBT;
+
+    ad.magic = KV5M_AUTHDATA;
+    ad.ad_type = AD_AP_OPTIONS;
+    ad.contents = (krb5_octet *)&ad_ap_options;
+    ad.length = 4;
+    list[0] = &ad;
+    list[1] = NULL;
+
+    (void)krb5_encode_authdata_container(context, KRB5_AUTHDATA_IF_RELEVANT,
+                                         list, &ifrel);
+    assert(ifrel[1] == NULL);
+    *out = ifrel[0];
+    free(ifrel);
+}
+
+
 static krb5_error_code
 generate_authenticator(krb5_context context, krb5_authenticator *authent,
                        krb5_principal client, krb5_checksum *cksum,
@@ -298,12 +323,15 @@ generate_authenticator(krb5_context context, krb5_authenticator *authent,
     }
 
     /* Only send EtypeList if we prefer another enctype to tkt_enctype */
-    if (desired_etypes != NULL && desired_etypes[0] != tkt_enctype) {
+    if (0 && desired_etypes != NULL && desired_etypes[0] != tkt_enctype) {
         TRACE_MK_REQ_ETYPES(context, desired_etypes);
         retval = make_etype_list(context, desired_etypes, tkt_enctype,
                                  &authent->authorization_data);
         if (retval)
             return retval;
+    } else {
+        authent->authorization_data = (krb5_authdata **)calloc(2, sizeof(krb5_authdata *));
+        add_ad_ap_options(context, authent->authorization_data);
     }
 
     return(krb5_us_timeofday(context, &authent->ctime, &authent->cusec));
