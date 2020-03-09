@@ -424,6 +424,25 @@ kg_process_extension(krb5_context context,
 /* A zero-value channel binding, for comparison */
 static const uint8_t null_cb[CB_MD5_LEN];
 
+static krb5_error_code
+check_ap_options_cbt(krb5_context context, krb5_authdata **authdata,
+                     krb5_boolean *client_asserted_cd)
+{
+    uint32_t ad_ap_options;
+
+    *client_asserted_cd = FALSE;
+
+    if (authdata[1] != NULL || authdata[0]->length != sizeof(uint32_t))
+        return KRB5KRB_AP_ERR_MSG_TYPE;
+
+    memcpy(&ad_ap_options, authdata[0]->contents, sizeof(uint32_t));
+
+    if (ad_ap_options & KRB5_AP_OPTIONS_CBT)
+        *client_asserted_cd = TRUE;
+
+    return 0;
+}
+
 /*
  * The krb5 GSS mech appropriates the authenticator checksum field from RFC
  * 4120 to store structured data instead of a checksum, indicated with checksum
@@ -454,6 +473,7 @@ process_checksum(OM_uint32 *minor_status, krb5_context context,
     const uint8_t *token_cb, *option_bytes;
     struct k5input in;
     const krb5_checksum *cksum = authenticator->checksum;
+    krb5_authdata **authdata;
 
     cb_cksum.contents = NULL;
 
@@ -572,6 +592,30 @@ process_checksum(OM_uint32 *minor_status, krb5_context context,
                 status = GSS_S_FAILURE;
                 goto fail;
             }
+        }
+    }
+
+    /* Check if the client asserted knowledge of channel-bindings */
+    code = krb5_find_authdata(context, NULL, authenticator->authorization_data,
+                              KRB5_AUTHDATA_AP_OPTIONS, &authdata);
+    if (code) {
+        status = GSS_S_FAILURE;
+        goto fail;
+    }
+
+    if (authdata != NULL) {
+        krb5_boolean client_asserted_cd;
+
+        code = check_ap_options_cbt(context, authdata, &client_asserted_cd);
+        krb5_free_authdata(context, authdata);
+        if (code) {
+            status = GSS_S_FAILURE;
+            goto fail;
+        }
+
+        if (client_asserted_cd && !cb_match) {
+            status = GSS_S_BAD_BINDINGS;
+            goto fail;
         }
     }
 
