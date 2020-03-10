@@ -254,6 +254,34 @@ cleanup:
 }
 
 static krb5_error_code
+add_ad_ap_options(krb5_context context, krb5_authdata **out)
+{
+    krb5_error_code code;
+    krb5_authdata ad, *list[2], **ifrel;
+
+    uint32_t ad_ap_options = KRB5_AP_OPTIONS_CBT;
+
+    ad.magic = KV5M_AUTHDATA;
+    ad.ad_type = KRB5_AUTHDATA_AP_OPTIONS;
+    ad.contents = (krb5_octet *)&ad_ap_options;
+    ad.length = 4;
+    list[0] = &ad;
+    list[1] = NULL;
+
+    code = krb5_encode_authdata_container(context, KRB5_AUTHDATA_IF_RELEVANT,
+                                          list, &ifrel);
+    if (code != 0)
+        return code;
+
+    assert(ifrel[1] == NULL);
+    *out = ifrel[0];
+    free(ifrel);
+
+    return 0;
+}
+
+
+static krb5_error_code
 generate_authenticator(krb5_context context, krb5_authenticator *authent,
                        krb5_principal client, krb5_checksum *cksum,
                        krb5_key key, krb5_ui_4 seq_number,
@@ -263,6 +291,7 @@ generate_authenticator(krb5_context context, krb5_authenticator *authent,
                        krb5_enctype tkt_enctype)
 {
     krb5_error_code retval;
+    krb5_boolean client_aware_cb;
     krb5_authdata **ext_authdata = NULL;
 
     authent->client = client;
@@ -304,6 +333,28 @@ generate_authenticator(krb5_context context, krb5_authenticator *authent,
                                  &authent->authorization_data);
         if (retval)
             return retval;
+    }
+
+    retval = profile_get_boolean(context->profile, KRB5_CONF_LIBDEFAULTS,
+                                 KRB5_CONF_CLIENT_AWARE_GSS_BINDINGS, NULL,
+                                 FALSE, &client_aware_cb);
+    if (retval)
+        return retval;
+
+    if (client_aware_cb) {
+        krb5_authdata **ap_options, **current = authent->authorization_data;
+        ap_options = (krb5_authdata **)calloc(2, sizeof(krb5_authdata *));
+        retval = add_ad_ap_options(context, ap_options);
+        if (retval)
+            return retval;
+
+        retval = krb5_merge_authdata(context, current, ap_options,
+                                     &authent->authorization_data);
+        krb5_free_authdata(context, ap_options);
+        krb5_free_authdata(context, current);
+        if (retval) {
+            return retval;
+        }
     }
 
     return(krb5_us_timeofday(context, &authent->ctime, &authent->cusec));
