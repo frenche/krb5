@@ -188,6 +188,14 @@ krb5_gss_import_name(minor_status, input_name_buffer,
                                    &princ);
         if (code)
             goto cleanup;
+    } else if ((input_name_type != NULL) &&
+               g_OID_equal(input_name_type, GSS_KRB5_NT_X509_CERT)) {
+        code = krb5_build_principal_ext(context, &princ, 0, NULL,
+                                        input_name_buffer->length,
+                                        input_name_buffer->value, 0);
+        if(code)
+            goto cleanup;
+        princ->type = KRB5_NT_X500_PRINCIPAL;
     } else {
 #ifndef NO_PASSWORD
         uid_t uid;
