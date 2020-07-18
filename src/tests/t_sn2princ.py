@@ -90,6 +90,16 @@ fname = 'www.kerberos.org'
 mark('dns_canonicalize_host=fallback')
 testfc(oname, oname, 'R1')
 
+# Verify forward resolution before testing for it.
+try:
+    ai = socket.getaddrinfo(oname, None, 0, 0, 0, socket.AI_CANONNAME)
+except socket.gaierror:
+    skip_rest('sn2princ tests', 'cannot forward resolve %s' % oname)
+(family, socktype, proto, canonname, sockaddr) = ai[0]
+if canonname.lower() != fname:
+    skip_rest('sn2princ tests',
+              '%s forward resolves to %s, not %s' % (oname, canonname, fname))
+
 # Test fallback canonicalization in krb5_get_credentials().
 oprinc = 'host/' + oname
 fprinc = 'host/' + fname
@@ -108,15 +118,10 @@ os.rename(realm.ccache + '.save', realm.ccache)
 realm.run(['./gcred', 'srv-hst', oprinc], env=fallback_canon,
           expected_msg=oprinc)
 
-# Verify forward resolution before testing for it.
-try:
-    ai = socket.getaddrinfo(oname, None, 0, 0, 0, socket.AI_CANONNAME)
-except socket.gaierror:
-    skip_rest('sn2princ tests', 'cannot forward resolve %s' % oname)
-(family, socktype, proto, canonname, sockaddr) = ai[0]
-if canonname.lower() != fname:
-    skip_rest('sn2princ tests',
-              '%s forward resolves to %s, not %s' % (oname, canonname, fname))
+# Test fallback canonicalization in keytab search.
+realm.run([kadminl, 'ktadd', fprinc])
+realm.run(['./icred', '-k', realm.keytab, '-S', 'host', oname], env=fallback_canon)
+exit(0)
 
 # Test forward-only canonicalization (rdns=false).
 mark('rdns=false')

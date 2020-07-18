@@ -31,6 +31,7 @@
 #ifndef LEAN_CLIENT
 
 #include "k5-int.h"
+#include "../os/os-proto.h"
 
 const char * KRB5_CALLCONV
 krb5_kt_get_type (krb5_context context, krb5_keytab keytab)
@@ -56,25 +57,23 @@ krb5_kt_get_entry(krb5_context context, krb5_keytab keytab,
                   krb5_const_principal principal, krb5_kvno vno,
                   krb5_enctype enctype, krb5_keytab_entry *entry)
 {
-    krb5_error_code err;
-    krb5_principal_data princ_data;
+    krb5_error_code ret;
+    struct canonprinc iter = { principal, .subst_defrealm = TRUE };
+    krb5_const_principal canonprinc;
 
-    if (krb5_is_referral_realm(&principal->realm)) {
-        char *realm;
-        princ_data = *principal;
-        principal = &princ_data;
-        err = krb5_get_default_realm(context, &realm);
-        if (err)
-            return err;
-        princ_data.realm.data = realm;
-        princ_data.realm.length = strlen(realm);
+    while ((ret = k5_canonprinc(context, &iter, &canonprinc)) == 0 &&
+           canonprinc != NULL) {
+        ret = keytab->ops->get(context, keytab, canonprinc, vno, enctype,
+                               entry);
+        TRACE_KT_GET_ENTRY(context, keytab, principal, vno, enctype, ret);
+        if (ret != KRB5_KT_NOTFOUND)
+            goto cleanup;
     }
-    err = krb5_x((keytab)->ops->get,(context, keytab, principal, vno, enctype,
-                                     entry));
-    TRACE_KT_GET_ENTRY(context, keytab, principal, vno, enctype, err);
-    if (principal == &princ_data)
-        krb5_free_default_realm(context, princ_data.realm.data);
-    return err;
+    ret = KRB5_KT_NOTFOUND;
+
+cleanup:
+    free_canonprinc(&iter);
+    return ret;
 }
 
 krb5_error_code KRB5_CALLCONV

@@ -142,6 +142,7 @@ static krb5_error_code get_credentials(context, cred, server, now,
 
     /* Remove assumed realm from host-based S4U2Proxy requests as they must
      * start in the client realm. */
+    /* XXX does not work with delayed canonicalization */
     server_data = *server->princ;
     if (cred->impersonator != NULL && server_data.type == KRB5_NT_SRV_HST)
         server_data.realm = empty_data();
