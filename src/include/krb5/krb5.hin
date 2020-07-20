@@ -2305,6 +2305,8 @@ typedef struct _krb5_cccol_cursor *krb5_cccol_cursor;
 #define KRB5_TC_MATCH_KTYPE        0x00000100
 /** The supported key types must match. */
 #define KRB5_TC_SUPPORTED_KTYPES   0x00000200
+/** Match only the server principal, not the client. */
+#define KRB5_TC_MATCH_SRV_ONLY     0x00000400
 
 /* Flags for krb5_cc_set_flags and similar. */
 /** Open and close the file for each cache operation. */
@@ -2447,6 +2449,7 @@ krb5_cc_store_cred(krb5_context context, krb5_ccache cache, krb5_creds *creds);
  * @li #KRB5_TC_SUPPORTED_KTYPES   Check all matching entries that have any
  *                                 supported encryption type and return the
  *                                 one with the encryption type listed earliest.
+ * @li #KRB5_TC_MATCH_SRV_ONLY     Only match on server principal, not client.
  *
  * Use krb5_free_cred_contents() to free @a creds when it is no longer needed.
  *

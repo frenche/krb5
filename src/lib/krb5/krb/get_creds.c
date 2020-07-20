@@ -101,6 +101,8 @@ construct_matching_creds(krb5_context context, krb5_flags options,
         if (!in_creds->second_ticket.length)
             return KRB5_NO_2ND_TKT;
     }
+    if (options & KRB5_GC_CONSTRAINED_DELEGATION)
+        *fields |= KRB5_TC_MATCH_SRV_ONLY;
 
     return 0;
 }

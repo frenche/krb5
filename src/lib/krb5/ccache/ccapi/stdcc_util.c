@@ -941,12 +941,19 @@ times_match_exact (t1, t2)
 }
 
 static krb5_boolean
+client_name_match(context, mcreds, creds)
+    krb5_context context;
+    const krb5_creds *mcreds, *creds;
+{
+    return krb5_principal_compare(context, mcreds->client,creds->client);
+}
+
+static krb5_boolean
 standard_fields_match(context, mcreds, creds)
     krb5_context context;
     const krb5_creds *mcreds, *creds;
 {
-    return (krb5_principal_compare(context, mcreds->client,creds->client) &&
-            krb5_principal_compare(context, mcreds->server,creds->server));
+    return krb5_principal_compare(context, mcreds->server,creds->server);
 }
 
 /* only match the server name portion, not the server realm portion */
@@ -956,12 +963,8 @@ srvname_match(context, mcreds, creds)
     krb5_context context;
     const krb5_creds *mcreds, *creds;
 {
-    krb5_boolean retval;
     krb5_principal_data p1, p2;
 
-    retval = krb5_principal_compare(context, mcreds->client,creds->client);
-    if (retval != TRUE)
-        return retval;
     /*
      * Hack to ignore the server realm for the purposes of the compare.
      */
@@ -1033,6 +1036,9 @@ int stdccCredsMatch(krb5_context context, krb5_creds *base,
     if (((MATCH_SET(KRB5_TC_MATCH_SRV_NAMEONLY) &&
           srvname_match(context, match, base)) ||
          standard_fields_match(context, match, base))
+        &&
+        (! MATCH_SET(KRB5_TC_MATCH_SRV_ONLY) &&
+          client_name_match(context, match, base))
         &&
         (! MATCH_SET(KRB5_TC_MATCH_IS_SKEY) ||
          match->is_skey == base->is_skey)

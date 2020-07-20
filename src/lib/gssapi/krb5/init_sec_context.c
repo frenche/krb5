@@ -148,7 +148,6 @@ static krb5_error_code get_credentials(context, cred, server, now,
         server_data.realm = empty_data();
     in_creds.server = &server_data;
 
-    in_creds.client = cred->name->princ;
     in_creds.times.endtime = endtime;
     in_creds.authdata = NULL;
     in_creds.keyblock.enctype = 0;
@@ -167,24 +166,11 @@ static krb5_error_code get_credentials(context, cred, server, now,
     }
 
     /*
-     * For IAKERB or constrained delegation, only check the cache in this step.
-     * For IAKERB we will ask the server to make any necessary TGS requests;
-     * for constrained delegation we will adjust in_creds and make an S4U2Proxy
-     * request below if the cache lookup fails.
-     */
-    if (cred->impersonator != NULL || cred->iakerb_mech)
-        flags |= KRB5_GC_CACHED;
-
-    code = krb5_get_credentials(context, flags, cred->ccache,
-                                &in_creds, &result_creds);
-
-    /*
      * Try constrained delegation if we have proxy credentials, unless
      * we are trying to get a ticket to ourselves (in which case we could
      * just use the evidence ticket directly from cache).
      */
-    if (code == KRB5_CC_NOTFOUND && cred->impersonator != NULL &&
-        !cred->iakerb_mech &&
+    if (cred->impersonator != NULL &&
         !krb5_principal_compare(context, cred->impersonator, server->princ)) {
 
         memset(&mcreds, 0, sizeof(mcreds));
@@ -200,10 +186,21 @@ static krb5_error_code get_credentials(context, cred, server, now,
         in_creds.client = cred->impersonator;
         in_creds.second_ticket = evidence_creds.ticket;
         flags = KRB5_GC_CANONICALIZE | KRB5_GC_CONSTRAINED_DELEGATION;
-        code = krb5_get_credentials(context, flags, cred->ccache,
-                                    &in_creds, &result_creds);
+    } else {
+        in_creds.client = cred->name->princ;
     }
 
+    /*
+     * For IAKERB or constrained delegation, only check the cache in this step.
+     * For IAKERB we will ask the server to make any necessary TGS requests;
+     * for constrained delegation we will adjust in_creds and make an S4U2Proxy
+     * request below if the cache lookup fails.
+     */
+    if (cred->iakerb_mech)
+        flags |= KRB5_GC_CACHED;
+
+    code = krb5_get_credentials(context, flags, cred->ccache,
+                                &in_creds, &result_creds);
     if (code)
         goto cleanup;
 

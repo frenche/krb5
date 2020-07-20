@@ -1119,12 +1119,11 @@ get_proxy_cred_from_kdc(krb5_context context, krb5_flags options,
             code = KRB5KRB_AP_WRONG_PRINC;
             goto cleanup;
         }
-    }
 
-    if (!krb5_principal_compare(context, in_creds->server, tkt->server)) {
-        krb5_free_principal(context, tkt->server);
-        tkt->server = NULL;
-        code = krb5_copy_principal(context, in_creds->server, &tkt->server);
+        /* Put the original evidence ticket in the output creds. */
+        krb5_free_data_contents(context, &tkt->second_ticket);
+        code = krb5int_copy_data_contents(context, &in_creds->second_ticket,
+                                          &tkt->second_ticket);
         if (code)
             goto cleanup;
     }
@@ -1157,6 +1156,11 @@ k5_get_proxy_cred_from_kdc(krb5_context context, krb5_flags options,
     struct canonprinc iter = { in_creds->server, .no_hostrealm = TRUE };
 
     *out_creds = NULL;
+
+    code = k5_get_cached_cred(context, options, ccache, in_creds, out_creds);
+    if ((code != KRB5_CC_NOTFOUND && code != KRB5_CC_NOT_KTYPE) ||
+        options & KRB5_GC_CACHED)
+        return code;
 
     copy = *in_creds;
     while ((code = k5_canonprinc(context, &iter, &canonprinc)) == 0 &&

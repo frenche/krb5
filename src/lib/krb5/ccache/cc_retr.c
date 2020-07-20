@@ -60,7 +60,8 @@ princs_match(krb5_context context, krb5_flags whichfields,
 {
     krb5_principal_data princ;
 
-    if (!krb5_principal_compare(context, mcreds->client, creds->client))
+    if (((whichfields & KRB5_TC_MATCH_SRV_ONLY) == 0) &&
+        !krb5_principal_compare(context, mcreds->client, creds->client))
         return FALSE;
     if (whichfields & KRB5_TC_MATCH_SRV_NAMEONLY) {
         /* Ignore the server realm. */
