@@ -147,6 +147,7 @@ static krb5_error_code get_credentials(context, cred, server, now,
     if (cred->impersonator != NULL && server_data.type == KRB5_NT_SRV_HST)
         server_data.realm = empty_data();
     in_creds.server = &server_data;
+    in_creds.client = cred->name->princ;
 
     in_creds.times.endtime = endtime;
     in_creds.authdata = NULL;
@@ -166,28 +167,28 @@ static krb5_error_code get_credentials(context, cred, server, now,
     }
 
     /*
-     * Try constrained delegation if we have proxy credentials, unless
-     * we are trying to get a ticket to ourselves (in which case we could
-     * just use the evidence ticket directly from cache).
+     * Try constrained delegation if we have proxy credentials.
      */
-    if (cred->impersonator != NULL &&
-        !krb5_principal_compare(context, cred->impersonator, server->princ)) {
+    if (cred->impersonator != NULL) {
+        /* If we are trying to get a ticket to ourselves, we should use the
+         * the evidence ticket directly from cache */
+        if (krb5_principal_compare(context, cred->impersonator, server->princ))
+            flags |= KRB5_GC_CACHED;
+        else {
+            memset(&mcreds, 0, sizeof(mcreds));
+            mcreds.magic = KV5M_CREDS;
+            mcreds.server = cred->impersonator;
+            mcreds.client = cred->name->princ;
+            code = krb5_cc_retrieve_cred(context, cred->ccache,
+                                         KRB5_TC_MATCH_AUTHDATA, &mcreds,
+                                         &evidence_creds);
+            if (code)
+                goto cleanup;
 
-        memset(&mcreds, 0, sizeof(mcreds));
-        mcreds.magic = KV5M_CREDS;
-        mcreds.server = cred->impersonator;
-        mcreds.client = cred->name->princ;
-        code = krb5_cc_retrieve_cred(context, cred->ccache,
-                                     KRB5_TC_MATCH_AUTHDATA, &mcreds,
-                                     &evidence_creds);
-        if (code)
-            goto cleanup;
-
-        in_creds.client = cred->impersonator;
-        in_creds.second_ticket = evidence_creds.ticket;
-        flags = KRB5_GC_CANONICALIZE | KRB5_GC_CONSTRAINED_DELEGATION;
-    } else {
-        in_creds.client = cred->name->princ;
+            in_creds.client = cred->impersonator;
+            in_creds.second_ticket = evidence_creds.ticket;
+            flags = KRB5_GC_CANONICALIZE | KRB5_GC_CONSTRAINED_DELEGATION;
+        }
     }
 
     /*
