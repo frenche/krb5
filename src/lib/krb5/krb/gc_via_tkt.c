@@ -122,7 +122,9 @@ check_reply_server(krb5_context context, krb5_flags kdcoptions,
 
         TRACE_CHECK_REPLY_SERVER_DIFFERS(context, in_cred->server,
                                          dec_rep->enc_part2->server);
-        return 0;
+
+        if (IS_TGS_PRINC(dec_rep->ticket->server))
+            return 0;
     }
 
     /* We didn't request canonicalization. */
