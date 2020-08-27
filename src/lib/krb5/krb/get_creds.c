@@ -560,6 +560,24 @@ wrong_enctype(krb5_context context, krb5_enctype enctype)
     return TRUE;
 }
 
+/* If we asked for krbtgt/ALIAS we'll always end with krbtgt/CANON@CANON */
+static krb5_boolean
+is_canon_krbtgt(krb5_context context, krb5_tkt_creds_context ctx)
+{
+
+    if (!IS_TGS_PRINC(ctx->tgs_in_creds->server))
+        return FALSE;
+    if (!IS_TGS_PRINC(ctx->reply_creds->server))
+        return FALSE;
+    if (!data_eq(ctx->reply_creds->server->data[1],
+                 ctx->cur_tgt->server->data[1]))
+        return FALSE;
+    if (!data_eq(ctx->reply_creds->server->realm,
+                 ctx->reply_creds->server->data[1]))
+        return FALSE;
+    return TRUE;
+}
+
 /* Advance the referral request loop. */
 static krb5_error_code
 step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
@@ -573,7 +591,8 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
 
     /* Check if we got the ticket we asked for.  Allow the KDC to canonicalize
      * the realm. */
-    if (krb5_principal_compare_any_realm(context, ctx->reply_creds->server,
+    if (is_canon_krbtgt(context, ctx) ||
+        krb5_principal_compare_any_realm(context, ctx->reply_creds->server,
                                          ctx->server)) {
         /* We didn't necessarily ask for it with the right enctypes.  Try a
          * non-referral request if so. */
@@ -592,13 +611,7 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
         return begin_non_referral(context, ctx);
     }
 
-    /* Active Directory may return a TGT to the local realm.  Try a
-     * non-referral query if we see this. */
     referral_realm = &ctx->reply_creds->server->data[1];
-    if (data_eq(*referral_realm, ctx->cur_tgt->server->data[1])) {
-        TRACE_TKT_CREDS_SAME_REALM_TGT(context, referral_realm);
-        return begin_non_referral(context, ctx);
-    }
 
     if (ctx->referral_count == 1) {
         /* The authdata in this TGT will be copied into subsequent TGTs or the
