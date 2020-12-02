@@ -503,3 +503,5 @@ EXPORTS
 ; new in 1.19
 	k5_cc_store_primary_cred			@470 ; PRIVATE
 	k5_kt_have_match				@471 ; PRIVATE GSSAPI
+	krb5_kdc_sign_ticket                            @471 ; TBD
+	krb5_kdc_verify_ticket                          @472 ; TBD
