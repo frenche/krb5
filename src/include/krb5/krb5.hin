@@ -8365,6 +8365,25 @@ krb5_error_code KRB5_CALLCONV
 krb5_pac_get_client_info(krb5_context context, const krb5_pac pac,
                          krb5_timestamp *authtime_out, char **princname_out);
 
+struct delegation_info {
+    char *proxy_target;
+    uint32_t transited_size;
+    char **transited_services;
+};
+
+/*
+ *
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_delegation_info(krb5_data *pac_deleg_info,
+                             struct delegation_info **deleg_info);
+
+krb5_error_code KRB5_CALLCONV
+krb5_pac_marshal_delegation_info(struct delegation_info *di, krb5_data *data);
+
+void KRB5_CALLCONV
+krb5_pac_free_delegation_info(struct delegation_info *di);
+
 /**
  * Allow the application to override the profile's allow_weak_crypto setting.
  *

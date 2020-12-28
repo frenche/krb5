@@ -139,7 +139,27 @@ check_pac(krb5_context context, const struct pac_and_info *p,
                     err(context, 0, "[pac: %s] type 1 have wrong length: %lu",
                         p->pac_name, (unsigned long)data.length);
                 }
-            } else if (list[i] != 12 && list[i] != 11) {
+            } else if (list[i] == 11) {
+                struct delegation_info *deleg_info = NULL;
+                krb5_data marshalled;
+
+                ret = krb5_pac_get_delegation_info(&data, &deleg_info);
+                if (ret)
+                    err(context, ret, "krb5_pac_get_delegation_info");
+
+                ret = krb5_pac_marshal_delegation_info(deleg_info, &marshalled);
+                if (ret)
+                    err(context, ret, "krb5_pac_marshal_delegation_info");
+
+                krb5_pac_free_delegation_info(deleg_info);
+
+                if ((marshalled.length != data.length) ||
+                    memcmp(marshalled.data, data.data, data.length))
+                    err(context, ret, "Marshalled data differs from original data");
+
+                krb5_free_data_contents(context, &marshalled);
+
+            } else if (list[i] != 12) {
                 err(context, 0, "[pac: %s] unknown type %lu",
                     p->pac_name, (unsigned long)list[i]);
             }

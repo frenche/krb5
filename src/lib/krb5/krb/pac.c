@@ -682,6 +682,346 @@ krb5_pac_verify_ext(krb5_context context,
     return 0;
 }
 
+#define PAC_DELEGATION_INFO_LENGTH 36
+
+#define REFERENT_ID_LENGTH 4
+#define CV_STR_LEN_REF 8
+#define CV_STR_HEADER 12
+#define RPC_HEADERS  16
+
+static char rpc_header[] = {0x01, 0x10, 0x08, 0x00, 0xcc, 0xcc, 0xcc, 0xcc};
+
+struct rpc_unicode_string {
+     uint32_t max_length;
+     uint32_t length;
+     uint32_t ref;
+};
+
+static krb5_error_code
+check_rpc_headers(unsigned char *p, unsigned int plen)
+{
+    unsigned int body_len;
+    unsigned int filler;
+
+    if (memcmp(p, rpc_header, sizeof(rpc_header)))
+        return ERANGE;
+    p += sizeof(rpc_header);
+
+    body_len = load_32_le(p);
+    if (body_len != plen - RPC_HEADERS)
+        return ERANGE;
+    p += 4;
+
+    filler = load_32_le(p);
+    if (filler != 0)
+        return ERANGE;
+
+    return 0;
+}
+
+static krb5_error_code
+get_rpc_unicode_string_len_ref(unsigned char *p, unsigned int plen,
+                               struct rpc_unicode_string *str)
+{
+    unsigned short length, max_length;
+
+    if (plen < CV_STR_LEN_REF)
+        return ERANGE;
+
+    length = load_16_le(p);
+    p += 2;
+    max_length = load_16_le(p);
+    p += 2;
+
+    if (length > max_length || length % 2 || max_length % 2)
+        return ERANGE;
+
+    str->length = (unsigned int)length;
+    str->max_length = (unsigned int)max_length;
+
+    str->ref = load_16_le(p);
+
+    return 0;
+}
+
+static krb5_error_code
+get_rpc_unicode_string_data(unsigned char *p, unsigned int plen,
+                        struct rpc_unicode_string *str, char **out,
+                        unsigned int *used)
+{
+    krb5_error_code ret;
+    unsigned int align, length, max_length, offset;
+
+    align = ((str->length / 2) % 2 ) * 2;
+    if (plen < CV_STR_HEADER + str->length + align)
+        return ERANGE;
+
+    max_length = load_32_le(p);
+    p += 4;
+
+    offset = load_32_le(p);
+    if (offset != 0)
+        return ERANGE;
+    p += 4;
+
+    length = load_32_le(p);
+    p += 4;
+
+    if (length != str->length / 2 || max_length != str->max_length / 2)
+        return ERANGE;
+
+    ret = k5_utf16le_to_utf8(p, str->length, out);
+    if (ret != 0)
+        return ret;
+
+    *used = CV_STR_HEADER + str->length + align;
+
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_pac_get_delegation_info(krb5_data *pac_deleg_info,
+                             struct delegation_info **deleg_info_out)
+{
+    krb5_error_code ret;
+    unsigned char *p, *p2, *pend;
+    struct delegation_info *di;
+    unsigned int used, i;
+    uint32_t trans_size;
+    struct rpc_unicode_string str;
+
+    if (pac_deleg_info->length < PAC_DELEGATION_INFO_LENGTH)
+        return ERANGE;
+
+    p = (unsigned char *)pac_deleg_info->data;
+    pend = p + pac_deleg_info->length;
+
+    ret = check_rpc_headers(p, pend - p);
+    if (ret)
+        return ret;
+    p += RPC_HEADERS;
+
+    p += REFERENT_ID_LENGTH;
+
+    ret = get_rpc_unicode_string_len_ref(p, pend - p, &str);
+    if (ret)
+        return ret;
+    p += CV_STR_LEN_REF;
+
+    trans_size = load_32_le(p);
+    p += 4;
+    p += REFERENT_ID_LENGTH;
+
+    /* Start of data */
+    di = k5alloc(sizeof(struct delegation_info), &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    ret = get_rpc_unicode_string_data(p, pend - p, &str, &di->proxy_target,
+                                      &used);
+    if (ret) {
+        krb5_pac_free_delegation_info(di);
+        return ret;
+    }
+    p += used;
+
+    if (trans_size != load_32_le(p)) {
+        krb5_pac_free_delegation_info(di);
+        return ERANGE;
+    }
+    p += 4;
+
+    di->transited_services = k5alloc(trans_size * sizeof(char *), &ret);
+    if (ret != 0) {
+        krb5_pac_free_delegation_info(di);
+        return ENOMEM;
+    }
+    di->transited_size = trans_size;
+
+    p2 = p + trans_size * CV_STR_LEN_REF;
+
+    for (i = 0; i < trans_size; i++) {
+        ret = get_rpc_unicode_string_len_ref(p, pend - p, &str);
+        if (ret) {
+            krb5_pac_free_delegation_info(di);
+            return ret;
+        }
+        p += CV_STR_LEN_REF;
+
+        ret = get_rpc_unicode_string_data(p2, pend - p2, &str,
+                                          &di->transited_services[i], &used);
+        if (ret) {
+            krb5_pac_free_delegation_info(di);
+            return ret;
+        }
+        p2 += used;
+    }
+
+    *deleg_info_out = di;
+
+    return 0;
+}
+
+static unsigned int
+cv_str_len(char *cstr)
+{
+    unsigned int len, str_len;
+
+    str_len = strlen(cstr);
+    len = CV_STR_HEADER + str_len * 2;
+    if (str_len % 2)
+        len += 2;
+
+    return len;
+}
+
+static void
+marshal_rpc_unicode_string_len_ref(unsigned char *p, char *cstr,
+                                   uint32_t *ref_id)
+{
+    uint16_t length = strlen(cstr) * 2;
+    uint16_t max_length = length + 2;
+
+    store_16_le(length, p);
+    p += 2;
+
+    store_16_le(max_length, p);
+    p += 2;
+
+    store_32_le(*ref_id, p);
+    *ref_id += 4;
+}
+
+static krb5_error_code
+marshal_rpc_unicode_string_data(unsigned char *p, char *cstr,
+                                unsigned int *used)
+{
+    krb5_error_code ret;
+    unsigned char *utf16;
+    size_t utf16_len;
+    uint32_t length = strlen(cstr);
+    uint32_t max_length = length + 1;
+
+    store_32_le(max_length, p);
+    p += 4;
+    store_32_le(0, p);
+    p += 4;
+    store_32_le(length, p);
+    p += 4;
+
+    ret = k5_utf8_to_utf16le(cstr, &utf16, &utf16_len);
+    if (ret != 0)
+        return ret;
+    if (utf16_len != length * 2) {
+        free(utf16);
+        return ERANGE;
+    }
+
+    memcpy(p, utf16, utf16_len);
+    free(utf16);
+
+    if (length % 2)
+        utf16_len += 2;
+    *used = CV_STR_HEADER + utf16_len;
+
+    return 0;
+}
+
+krb5_error_code KRB5_CALLCONV
+krb5_pac_marshal_delegation_info(struct delegation_info *di, krb5_data *data)
+{
+    krb5_error_code ret;
+    unsigned char *p, *d;
+    uint32_t i, len, used;
+    uint32_t ref_id;
+
+    len = PAC_DELEGATION_INFO_LENGTH;
+
+    len += cv_str_len(di->proxy_target);
+
+    len += CV_STR_LEN_REF * di->transited_size;
+    len += 4; /* count */
+    for (i = 0; i < di->transited_size; i++) {
+        len += cv_str_len(di->transited_services[i]);
+    }
+
+    if (len % 8)
+        len += 8 - (len % 8);
+
+    d = k5alloc(len, &ret);
+    if (ret != 0)
+        return ENOMEM;
+
+    p = d;
+    ref_id = 0x020000;
+
+    memcpy(p, rpc_header, 8);
+    p += 8;
+    store_32_le(len - RPC_HEADERS, p);
+    p += 4;
+    store_32_le(0, p); // filler
+    p += 4;
+    store_32_le(ref_id, p);
+    p += 4;
+    ref_id += 4;
+
+    marshal_rpc_unicode_string_len_ref(p, di->proxy_target, &ref_id);
+    p += CV_STR_LEN_REF;
+
+    store_32_le(di->transited_size, p);
+    p += 4;
+
+    store_32_le(ref_id, p);
+    p += 4;
+    ref_id += 4;
+
+    ret = marshal_rpc_unicode_string_data(p, di->proxy_target, &used);
+    if (ret) {
+        free(d);
+        return ret;
+    }
+    p += used;
+
+    store_32_le(di->transited_size, p);
+    p += 4;
+
+    for (i = 0; i < di->transited_size; i++) {
+        marshal_rpc_unicode_string_len_ref(p, di->transited_services[i],
+                                           &ref_id);
+        p += CV_STR_LEN_REF;
+    }
+
+    for (i = 0; i < di->transited_size; i++) {
+        ret = marshal_rpc_unicode_string_data(p, di->transited_services[i],
+                                              &used);
+        if (ret) {
+            free(d);
+            return ret;
+        }
+        p += used;
+    }
+
+    data->data = (char*)d;
+    data->length = len;
+
+    return 0;
+}
+
+void KRB5_CALLCONV
+krb5_pac_free_delegation_info(struct delegation_info *di)
+{
+    unsigned int i;
+
+    if (di == NULL)
+        return;
+
+    free(di->proxy_target);
+    for (i = 0; i < di->transited_size; i++)
+        free(di->transited_services[i]);
+    free(di->transited_services);
+    free(di);
+}
+
 /*
  * PAC auth data attribute backend
  */
